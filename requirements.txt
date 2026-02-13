@@ -1,0 +1,11 @@
+langgraph>=1.0.0
+langchain>=1.0.0
+langchain-community>=0.3.0
+langchain-openai>=0.3.34
+psycopg[binary]>=3.2.11
+python-dotenv>=1.0.1
+rank-bm25>=0.2.2
+sqlparse>=0.5.0
+pandas>=2.2.2
+kagglehub>=0.3.3
+pytest>=8.3.0
