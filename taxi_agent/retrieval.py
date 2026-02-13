@@ -40,6 +40,7 @@ class SchemaRetriever:
         self.keyword_retriever = None
         self.ensemble_retriever = None
         self.schema_fingerprint: str = ""
+        self._bm25_dependency_missing = False
 
     def _make_schema_fingerprint(self, tables: Sequence[TableSchema]) -> str:
         parts = []
@@ -71,7 +72,9 @@ class SchemaRetriever:
             has_vector = self.retriever is not None
             has_keyword = self.keyword_retriever is not None
             vector_expected = self.embedding_model is not None
-            keyword_expected = BM25Retriever is not None
+            keyword_expected = (
+                BM25Retriever is not None and not self._bm25_dependency_missing
+            )
             vector_ready = (not vector_expected) or has_vector
             keyword_ready = (not keyword_expected) or has_keyword
             if vector_ready and keyword_ready:
@@ -80,12 +83,14 @@ class SchemaRetriever:
         self.schema_fingerprint = fingerprint
         docs = [self._table_to_document(t) for t in tables]
 
-        if BM25Retriever is not None:
+        if BM25Retriever is not None and not self._bm25_dependency_missing:
             try:
                 bm25 = BM25Retriever.from_documents(docs)
                 bm25.k = self.config.top_k_tables
                 self.keyword_retriever = bm25
             except Exception as exc:
+                if isinstance(exc, ImportError):
+                    self._bm25_dependency_missing = True
                 self.logger.warning(
                     "BM25 retriever unavailable; fallback to vector-only retrieval: %s",
                     exc,

@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .mypy_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
@@ -17,6 +19,7 @@ venv/
 # Local/generated artifacts
 dataset/
 agent_workflow.mmd
+*.log
 
 # OS / Editor
 .DS_Store

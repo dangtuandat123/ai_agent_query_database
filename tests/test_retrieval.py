@@ -123,6 +123,31 @@ def test_bm25_retried_when_previous_build_failed(monkeypatch) -> None:
     assert retriever.keyword_retriever is not None
 
 
+def test_bm25_missing_dependency_not_retried_for_same_fingerprint(monkeypatch) -> None:
+    class MissingBM25:
+        calls = 0
+
+        @classmethod
+        def from_documents(cls, docs):
+            _ = docs
+            cls.calls += 1
+            raise ImportError("missing rank_bm25")
+
+    monkeypatch.setattr("taxi_agent.retrieval.BM25Retriever", MissingBM25)
+
+    retriever = SchemaRetriever(
+        embedding_model=None,
+        config=SchemaRetrieverConfig(top_k_tables=1, search_type="mmr", fetch_k=20),
+    )
+    tables = _sample_tables()
+
+    retriever.refresh(tables)
+    retriever.refresh(tables)
+
+    assert MissingBM25.calls == 1
+    assert retriever.keyword_retriever is None
+
+
 def test_vector_retried_when_previous_build_failed() -> None:
     retriever = SchemaRetriever(
         embedding_model=FlakyEmbeddings(),
