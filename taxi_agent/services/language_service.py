@@ -87,3 +87,12 @@ def empty_question_message() -> str:
         "Câu hỏi đang trống. Vui lòng nhập câu hỏi phân tích dữ liệu taxi.\n"
         "The question is empty. Please provide a taxi analytics question."
     )
+
+
+def internal_error_message(question: str) -> str:
+    if is_probably_vietnamese(question):
+        return (
+            "Hệ thống gặp lỗi nội bộ khi xử lý yêu cầu. "
+            "Vui lòng thử lại sau."
+        )
+    return "The system encountered an internal error while processing your request. Please try again."

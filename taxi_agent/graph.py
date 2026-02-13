@@ -17,6 +17,7 @@ from .services.language_service import (
     error_after_retry_message,
     fallback_no_data_message,
     fallback_success_message,
+    internal_error_message,
     unsupported_message,
 )
 from .services.schema_service import SchemaService
@@ -64,6 +65,7 @@ class TaxiDashboardAgent:
             dsn=settings.postgres_dsn,
             row_limit=settings.query_row_limit,
             query_timeout_ms=settings.query_timeout_ms,
+            default_schema=settings.db_schema,
             logger=self.db_logger,
         )
 
@@ -370,8 +372,25 @@ class TaxiDashboardAgent:
             )
 
         initial_state: DashboardState = {"question": clean_question, "attempts": 0}
-        result = self.graph.invoke(initial_state)
-        return cast(AgentResult, result)
+        try:
+            result = self.graph.invoke(initial_state)
+            return cast(AgentResult, result)
+        except Exception as exc:
+            self.logger.exception("Graph execution failed: %s", exc)
+            message = str(exc)
+            return cast(
+                AgentResult,
+                {
+                    "question": clean_question,
+                    "route": "unsupported",
+                    "route_reason": f"Internal graph error: {message}",
+                    "attempts": 0,
+                    "sql_error": message,
+                    "sql_error_type": "internal",
+                    "sql_error_message": message,
+                    "final_answer": internal_error_message(clean_question),
+                },
+            )
 
     def get_workflow_mermaid(self) -> str:
         return self.graph.get_graph().draw_mermaid()

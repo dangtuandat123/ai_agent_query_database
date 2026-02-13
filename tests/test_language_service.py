@@ -3,6 +3,7 @@ from taxi_agent.services.language_service import (
     error_after_retry_message,
     fallback_no_data_message,
     fallback_success_message,
+    internal_error_message,
     is_probably_vietnamese,
     unsupported_message,
 )
@@ -43,3 +44,8 @@ def test_empty_question_message() -> None:
     msg = empty_question_message()
     assert "Câu hỏi đang trống" in msg
     assert "The question is empty" in msg
+
+
+def test_internal_error_message_vn_en() -> None:
+    assert "lỗi nội bộ" in internal_error_message("Trong thang 3/2018 co bao nhieu chuyen?")
+    assert "internal error" in internal_error_message("How many trips in March 2018?")

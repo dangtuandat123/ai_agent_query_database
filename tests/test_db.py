@@ -54,9 +54,11 @@ def test_run_query_sets_read_only_and_timeout(monkeypatch: Any) -> None:
 
     assert rows == [{"ok": 1}]
     assert fake_cursor.executed[0][0] == "SET TRANSACTION READ ONLY"
-    assert fake_cursor.executed[1][0] == "SELECT set_config('statement_timeout', %s, true)"
-    assert fake_cursor.executed[1][1] == ("1234",)
-    assert fake_cursor.executed[2][0] == "SELECT 1"
+    assert fake_cursor.executed[1][0] == "SELECT set_config('search_path', %s, true)"
+    assert fake_cursor.executed[1][1] == ("public",)
+    assert fake_cursor.executed[2][0] == "SELECT set_config('statement_timeout', %s, true)"
+    assert fake_cursor.executed[2][1] == ("1234",)
+    assert fake_cursor.executed[3][0] == "SELECT 1"
 
 
 def test_get_table_info_uses_langchain_sqldatabase_cache(monkeypatch: Any) -> None:

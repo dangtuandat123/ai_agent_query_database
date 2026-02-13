@@ -15,11 +15,13 @@ class PostgresClient:
         dsn: str,
         row_limit: int = 100,
         query_timeout_ms: int = 30000,
+        default_schema: str = "public",
         logger: logging.Logger | None = None,
     ):
         self.dsn = dsn
         self.row_limit = row_limit
         self.query_timeout_ms = query_timeout_ms
+        self.default_schema = default_schema
         self.logger = logger or logging.getLogger(__name__)
         self._sql_db_by_schema: Dict[str, SQLDatabase] = {}
 
@@ -42,6 +44,12 @@ class PostgresClient:
                 # Defense-in-depth: even if SQL guard misses something,
                 # this transaction is forced read-only.
                 cur.execute("SET TRANSACTION READ ONLY")
+                # Pin search_path to the configured analytics schema to avoid
+                # accidentally reading same-named tables from another schema.
+                cur.execute(
+                    "SELECT set_config('search_path', %s, true)",
+                    (self.default_schema,),
+                )
                 # Apply timeout only for this transaction.
                 cur.execute(
                     "SELECT set_config('statement_timeout', %s, true)",

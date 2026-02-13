@@ -102,6 +102,7 @@ python smoke_run.py
 - Agent retries SQL generation when query fails (`MAX_SQL_RETRIES`).
 - Query timeout is configurable via `QUERY_TIMEOUT_MS` (default: 30000ms).
 - SQL repair auto-expands from retrieved schema to full schema when needed.
+- DB execution pins `search_path` to `DB_SCHEMA` for safer schema isolation.
 - Data loader supports safe modes with `IMPORT_MODE`: `fail_if_exists`, `truncate`, `append`.
 - Optional CSV path override for loader/preview via `TAXI_CSV_PATH`
   (relative paths are resolved from project root).

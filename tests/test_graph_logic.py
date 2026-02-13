@@ -282,3 +282,30 @@ def test_graph_embedding_init_failure_fallback(monkeypatch: pytest.MonkeyPatch) 
         llm=fake_llm,  # type: ignore[arg-type]
     )
     assert agent.embedding_model is None
+
+
+def test_graph_internal_failure_returns_safe_response() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM()
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+
+    class BrokenGraph:
+        def invoke(self, state: Any) -> Any:
+            _ = state
+            raise RuntimeError("graph crashed")
+
+    agent.graph = BrokenGraph()  # type: ignore[assignment]
+    result = agent.ask("How many trips?")
+
+    assert result["route"] == "unsupported"
+    assert result["sql_error_type"] == "internal"
+    assert "graph crashed" in result["sql_error"]
+    assert "internal error" in result["final_answer"].lower()
