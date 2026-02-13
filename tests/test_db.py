@@ -39,9 +39,11 @@ class FakeConnection:
 def test_run_query_sets_read_only_and_timeout(monkeypatch: Any) -> None:
     fake_cursor = FakeCursor()
     fake_conn = FakeConnection(fake_cursor)
+    seen: dict[str, Any] = {}
 
-    def fake_connect(dsn: str) -> FakeConnection:
-        _ = dsn
+    def fake_connect(dsn: str, connect_timeout: int | None = None) -> FakeConnection:
+        seen["dsn"] = dsn
+        seen["connect_timeout"] = connect_timeout
         return fake_conn
 
     monkeypatch.setattr("taxi_agent.db.psycopg.connect", fake_connect)
@@ -49,10 +51,12 @@ def test_run_query_sets_read_only_and_timeout(monkeypatch: Any) -> None:
     client = PostgresClient(
         dsn="postgresql://postgres:postgres@localhost:5432/taxi_db",
         query_timeout_ms=1234,
+        connect_timeout_seconds=7,
     )
     rows = client.run_query("SELECT 1")
 
     assert rows == [{"ok": 1}]
+    assert seen["connect_timeout"] == 7
     assert fake_cursor.executed[0][0] == "SET TRANSACTION READ ONLY"
     assert fake_cursor.executed[1][0] == "SELECT set_config('search_path', %s, true)"
     assert fake_cursor.executed[1][1] == ("public",)

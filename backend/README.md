@@ -9,6 +9,7 @@ docker compose -f backend/docker-compose.yml up -d
 ## 2) Configure environment
 
 Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`.
+Optional: set `DB_CONNECT_TIMEOUT_SECONDS` to control PostgreSQL connect timeout.
 
 ## 3) Load CSV into PostgreSQL
 

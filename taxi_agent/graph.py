@@ -66,6 +66,7 @@ class TaxiDashboardAgent:
             row_limit=settings.query_row_limit,
             query_timeout_ms=settings.query_timeout_ms,
             default_schema=settings.db_schema,
+            connect_timeout_seconds=settings.db_connect_timeout_seconds,
             logger=self.db_logger,
         )
 

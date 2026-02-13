@@ -122,3 +122,5 @@ def test_allowlist_fail() -> None:
     )
     assert err is not None
     assert "outside allowed schema context" in err
+    assert "public.other_table" in err
+    assert "other_table, public.other_table" not in err

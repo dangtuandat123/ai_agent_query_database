@@ -34,6 +34,7 @@ def test_load_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.schema_cache_ttl_seconds == 300
     assert settings.schema_full_context_max_chars == 30000
     assert settings.log_level == "INFO"
+    assert settings.db_connect_timeout_seconds == 10
 
 
 def test_load_settings_invalid_int(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,3 +122,17 @@ def test_blank_embedding_model_fallback_to_default(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("OPENROUTER_EMBEDDING_MODEL", "   ")
     settings = load_settings()
     assert settings.openrouter_embedding_model == "google/gemini-embedding-001"
+
+
+def test_db_connect_timeout_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_base_env(monkeypatch)
+    monkeypatch.setenv("DB_CONNECT_TIMEOUT_SECONDS", "5")
+    settings = load_settings()
+    assert settings.db_connect_timeout_seconds == 5
+
+
+def test_db_connect_timeout_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_base_env(monkeypatch)
+    monkeypatch.setenv("DB_CONNECT_TIMEOUT_SECONDS", "0")
+    with pytest.raises(ValueError):
+        load_settings()

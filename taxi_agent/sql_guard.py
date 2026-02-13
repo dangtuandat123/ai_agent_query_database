@@ -182,6 +182,18 @@ def _build_keyword_stream(sql: str) -> str:
     return " ".join(words)
 
 
+def _format_disallowed_tables(disallowed_tables: set[str]) -> List[str]:
+    full_names = {t for t in disallowed_tables if "." in t}
+    short_names = {t for t in disallowed_tables if "." not in t}
+
+    filtered_short_names = {
+        short_name
+        for short_name in short_names
+        if not any(full_name.endswith(f".{short_name}") for full_name in full_names)
+    }
+    return sorted(full_names | filtered_short_names)
+
+
 def validate_readonly_sql(
     sql: str,
     allowed_tables: Optional[List[str]] = None,
@@ -219,11 +231,12 @@ def validate_readonly_sql(
 
     if allowed_tables:
         allowed_lower = {t.lower() for t in allowed_tables}
-        disallowed = [t for t in referenced_tables if t not in allowed_lower]
+        disallowed = {t for t in referenced_tables if t not in allowed_lower}
         if disallowed:
+            disallowed_names = _format_disallowed_tables(disallowed)
             return (
                 "Query references table(s) outside allowed schema context: "
-                + ", ".join(sorted(disallowed))
+                + ", ".join(disallowed_names)
             )
 
     return None

@@ -101,6 +101,7 @@ python smoke_run.py
 - SQL guard also blocks `SELECT ... INTO` and locking clauses (`FOR UPDATE`, `FOR SHARE`, ...).
 - Agent retries SQL generation when query fails (`MAX_SQL_RETRIES`).
 - Query timeout is configurable via `QUERY_TIMEOUT_MS` (default: 30000ms).
+- DB connect timeout is configurable via `DB_CONNECT_TIMEOUT_SECONDS` (default: 10s).
 - SQL repair auto-expands from retrieved schema to full schema when needed.
 - DB execution pins `search_path` to `DB_SCHEMA` for safer schema isolation.
 - Data loader supports safe modes with `IMPORT_MODE`: `fail_if_exists`, `truncate`, `append`.

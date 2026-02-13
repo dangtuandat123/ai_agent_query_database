@@ -16,12 +16,14 @@ class PostgresClient:
         row_limit: int = 100,
         query_timeout_ms: int = 30000,
         default_schema: str = "public",
+        connect_timeout_seconds: int = 10,
         logger: logging.Logger | None = None,
     ):
         self.dsn = dsn
         self.row_limit = row_limit
         self.query_timeout_ms = query_timeout_ms
         self.default_schema = default_schema
+        self.connect_timeout_seconds = connect_timeout_seconds
         self.logger = logger or logging.getLogger(__name__)
         self._sql_db_by_schema: Dict[str, SQLDatabase] = {}
 
@@ -39,7 +41,10 @@ class PostgresClient:
         return sql_db
 
     def run_query(self, sql: str) -> List[Dict[str, Any]]:
-        with psycopg.connect(self.dsn) as conn:
+        with psycopg.connect(
+            self.dsn,
+            connect_timeout=self.connect_timeout_seconds,
+        ) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 # Defense-in-depth: even if SQL guard misses something,
                 # this transaction is forced read-only.
@@ -61,7 +66,10 @@ class PostgresClient:
 
     def check_connection(self) -> Tuple[bool, str]:
         try:
-            with psycopg.connect(self.dsn) as conn:
+            with psycopg.connect(
+                self.dsn,
+                connect_timeout=self.connect_timeout_seconds,
+            ) as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT 1")
                     cur.fetchone()
@@ -81,7 +89,10 @@ class PostgresClient:
             WHERE table_schema = %s
             ORDER BY table_name, ordinal_position
         """
-        with psycopg.connect(self.dsn) as conn:
+        with psycopg.connect(
+            self.dsn,
+            connect_timeout=self.connect_timeout_seconds,
+        ) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(query, (table_schema,))
                 rows = cur.fetchall()
