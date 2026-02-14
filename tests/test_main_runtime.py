@@ -164,3 +164,33 @@ def test_main_returns_error_code_on_settings_failure(monkeypatch, capsys) -> Non
     out = capsys.readouterr().out
     assert exit_code == 1
     assert "Configuration error:" in out
+
+
+def test_main_returns_error_code_on_runtime_failure(monkeypatch, capsys) -> None:
+    class FakeAgent:
+        def __init__(self, settings: Settings) -> None:
+            _ = settings
+
+        def get_workflow_mermaid(self) -> str:
+            return "graph TD;"
+
+        def save_workflow_mermaid(self, file_path: str = "agent_workflow.mmd") -> str:
+            _ = file_path
+            return "agent_workflow.mmd"
+
+        def ask(self, question: str, thread_id: str = "default"):
+            _ = (question, thread_id)
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "main.parse_args",
+        lambda: argparse.Namespace(question="abc", thread_id="demo"),
+    )
+    monkeypatch.setattr("main.load_dotenv", lambda: None)
+    monkeypatch.setattr("main.load_settings", _settings)
+    monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
+
+    exit_code = run_main()
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Runtime error: boom" in out

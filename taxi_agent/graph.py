@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+import threading
 from typing import Any, Dict, Literal, Optional, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -118,6 +119,7 @@ class TaxiDashboardAgent:
         self.metadata_service = MetadataContextService(max_chars=3000)
         self._conversation_memory: Dict[str, Dict[str, str]] = {}
         self._max_memory_threads = settings.memory_max_threads
+        self._memory_lock = threading.Lock()
 
         self.graph = self._build_graph()
 
@@ -143,18 +145,19 @@ class TaxiDashboardAgent:
         sql_query: str,
         final_answer: str,
     ) -> None:
-        if thread_id in self._conversation_memory:
-            # Move existing thread to the end (most recent).
-            self._conversation_memory.pop(thread_id, None)
-        elif len(self._conversation_memory) >= self._max_memory_threads:
-            oldest_thread_id = next(iter(self._conversation_memory))
-            self._conversation_memory.pop(oldest_thread_id, None)
+        with self._memory_lock:
+            if thread_id in self._conversation_memory:
+                # Move existing thread to the end (most recent).
+                self._conversation_memory.pop(thread_id, None)
+            elif len(self._conversation_memory) >= self._max_memory_threads:
+                oldest_thread_id = next(iter(self._conversation_memory))
+                self._conversation_memory.pop(oldest_thread_id, None)
 
-        self._conversation_memory[thread_id] = {
-            "question": question,
-            "sql_query": sql_query,
-            "final_answer": final_answer,
-        }
+            self._conversation_memory[thread_id] = {
+                "question": question,
+                "sql_query": sql_query,
+                "final_answer": final_answer,
+            }
 
     def _build_openrouter_headers(self, settings: Settings) -> Optional[Dict[str, str]]:
         default_headers: Dict[str, str] = {}
@@ -546,6 +549,7 @@ class TaxiDashboardAgent:
         return builder.compile()
 
     def ask(self, question: str, thread_id: str = "default") -> AgentResult:
+        normalized_thread_id = self._normalize_thread_id(thread_id)
         clean_question = question.strip()
         if not clean_question:
             self.logger.warning("Received empty question.")
@@ -553,6 +557,7 @@ class TaxiDashboardAgent:
                 AgentResult,
                 {
                     "question": "",
+                    "thread_id": normalized_thread_id,
                     "route": "unsupported",
                     "route_reason": "Empty question.",
                     "attempts": 0,
@@ -560,8 +565,8 @@ class TaxiDashboardAgent:
                 },
             )
 
-        normalized_thread_id = self._normalize_thread_id(thread_id)
-        previous_turn = self._conversation_memory.get(normalized_thread_id, {})
+        with self._memory_lock:
+            previous_turn = dict(self._conversation_memory.get(normalized_thread_id, {}))
         initial_state: DashboardState = {
             "question": clean_question,
             "thread_id": normalized_thread_id,
@@ -571,7 +576,9 @@ class TaxiDashboardAgent:
             "previous_final_answer": previous_turn.get("final_answer", ""),
         }
         try:
-            result = self.graph.invoke(initial_state)
+            raw_result = self.graph.invoke(initial_state)
+            result = cast(DashboardState, dict(raw_result))
+            result.setdefault("thread_id", normalized_thread_id)
             if (
                 result.get("route") == "sql"
                 and not result.get("sql_error")
@@ -591,6 +598,7 @@ class TaxiDashboardAgent:
                 AgentResult,
                 {
                     "question": clean_question,
+                    "thread_id": normalized_thread_id,
                     "route": "unsupported",
                     "route_reason": f"Internal graph error: {message}",
                     "attempts": 0,
@@ -611,8 +619,9 @@ class TaxiDashboardAgent:
         return str(path.resolve())
 
     def clear_thread_memory(self, thread_id: Optional[str] = None) -> None:
-        if thread_id is None:
-            self._conversation_memory.clear()
-            return
-        normalized_thread_id = self._normalize_thread_id(thread_id)
-        self._conversation_memory.pop(normalized_thread_id, None)
+        with self._memory_lock:
+            if thread_id is None:
+                self._conversation_memory.clear()
+                return
+            normalized_thread_id = self._normalize_thread_id(thread_id)
+            self._conversation_memory.pop(normalized_thread_id, None)

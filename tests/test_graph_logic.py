@@ -247,9 +247,32 @@ def test_graph_empty_question_short_circuit() -> None:
 
     assert result["route"] == "unsupported"
     assert result["route_reason"] == "Empty question."
+    assert result["thread_id"] == "default"
     assert "The question is empty" in result["final_answer"]
     assert fake_db.schema_calls == 0
     assert fake_db.queries == []
+
+
+def test_graph_thread_id_blank_normalizes_to_default() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Show one row", thread_id="   ")
+    assert result["thread_id"] == "default"
 
 
 def test_graph_generation_error_preserved_without_execute() -> None:

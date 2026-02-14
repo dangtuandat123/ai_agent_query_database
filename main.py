@@ -88,17 +88,22 @@ def main() -> int:
     except (TypeError, ValueError):
         supports_thread_id = False
 
-    if supports_thread_id:
-        result = agent.ask(question, thread_id=thread_id)
-        effective_thread_id = thread_id
-    else:
-        # Backward compatibility for older/opaque agent signatures.
-        result = agent.ask(question)
-        effective_thread_id = "default"
-        if thread_id != "default":
-            logging.getLogger(__name__).warning(
-                "Agent.ask() signature does not expose thread_id; using default thread.",
-            )
+    try:
+        if supports_thread_id:
+            result = agent.ask(question, thread_id=thread_id)
+            effective_thread_id = thread_id
+        else:
+            # Backward compatibility for older/opaque agent signatures.
+            result = agent.ask(question)
+            effective_thread_id = "default"
+            if thread_id != "default":
+                logging.getLogger(__name__).warning(
+                    "Agent.ask() signature does not expose thread_id; using default thread.",
+                )
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Agent execution failed: %s", exc)
+        print(f"Runtime error: {exc}")
+        return 1
 
     print("=== Taxi Agent Database Dashboard ===")
     print(f"Question: {question}")
