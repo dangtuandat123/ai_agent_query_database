@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 import os
+import re
 from typing import Optional
+
+
+SCHEMA_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,16 @@ def _get_log_level_env(name: str, default: str = "INFO") -> str:
     return default
 
 
+def _validate_db_schema(value: str) -> str:
+    schema = value.strip() or "public"
+    if not SCHEMA_NAME_PATTERN.fullmatch(schema):
+        raise ValueError(
+            "DB_SCHEMA must be a single unquoted PostgreSQL schema name "
+            "(letters, digits, underscore; must not start with digit)."
+        )
+    return schema
+
+
 def load_settings() -> Settings:
     openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
     if not openrouter_api_key:
@@ -97,7 +111,7 @@ def load_settings() -> Settings:
     query_row_limit = _get_int_env("QUERY_ROW_LIMIT", 100)
     query_timeout_ms = _get_int_env("QUERY_TIMEOUT_MS", 30000)
     max_sql_retries = _get_int_env("MAX_SQL_RETRIES", 1, min_value=0)
-    db_schema = os.getenv("DB_SCHEMA", "public").strip() or "public"
+    db_schema = _validate_db_schema(os.getenv("DB_SCHEMA", "public"))
     schema_top_k_tables = _get_int_env("SCHEMA_TOP_K_TABLES", 5)
     schema_max_columns_per_table = _get_int_env("SCHEMA_MAX_COLUMNS_PER_TABLE", 40)
     schema_context_max_chars = _get_int_env("SCHEMA_CONTEXT_MAX_CHARS", 12000)

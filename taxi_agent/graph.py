@@ -59,7 +59,8 @@ def _stringify_content(content: Any) -> str:
 
 
 class TaxiDashboardAgent:
-    NON_REPAIRABLE_ERROR_TYPES = {"provider", "connection"}
+    NON_REPAIRABLE_ERROR_TYPES = {"provider", "connection", "schema_context"}
+    MAX_THREAD_ID_LENGTH = 128
 
     def __init__(
         self,
@@ -131,7 +132,9 @@ class TaxiDashboardAgent:
 
     @staticmethod
     def _normalize_thread_id(thread_id: str) -> str:
-        normalized = (thread_id or "").strip()
+        normalized = " ".join((thread_id or "").split())
+        if len(normalized) > TaxiDashboardAgent.MAX_THREAD_ID_LENGTH:
+            normalized = normalized[: TaxiDashboardAgent.MAX_THREAD_ID_LENGTH]
         return normalized or "default"
 
     @staticmethod

@@ -288,6 +288,30 @@ def test_graph_thread_id_blank_normalizes_to_default() -> None:
     assert result["thread_id"] == "default"
 
 
+def test_graph_thread_id_normalization_collapses_spaces_and_limits_length() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    noisy_thread_id = ("  team    finance   " * 20).strip()
+    result = agent.ask("Show one row", thread_id=noisy_thread_id)
+    assert "  " not in result["thread_id"]
+    assert len(result["thread_id"]) <= TaxiDashboardAgent.MAX_THREAD_ID_LENGTH
+
+
 def test_graph_generation_error_preserved_without_execute() -> None:
     tables = _tables()
     fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
@@ -334,6 +358,39 @@ def test_graph_generation_error_then_regenerate_success() -> None:
     assert result["final_answer"] == "done"
     assert len(fake_db.queries) == 1
     assert fake_llm.sql_calls == 2
+
+
+def test_graph_schema_context_error_fails_fast_without_repair() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(route="sql", intent="sql_query")
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    s = replace(_settings(), max_sql_retries=3)
+    agent = TaxiDashboardAgent(
+        s,
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+
+    class BrokenSQLService:
+        def generate_sql(self, **kwargs: Any) -> dict[str, Any]:
+            _ = kwargs
+            return {
+                "sql_query": "",
+                "sql_reasoning": "",
+                "sql_error": "Schema context is empty, cannot generate SQL.",
+                "sql_error_type": "schema_context",
+                "sql_error_message": "Schema context is empty, cannot generate SQL.",
+            }
+
+    agent.sql_service = BrokenSQLService()  # type: ignore[assignment]
+    result = agent.ask("Do a SQL query")
+
+    assert result["sql_error_type"] == "schema_context"
+    assert result["attempts"] == 0
+    assert fake_db.queries == []
 
 
 def test_graph_provider_generation_error_fails_fast_without_repair() -> None:

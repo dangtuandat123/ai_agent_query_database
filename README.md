@@ -112,6 +112,7 @@ python smoke_run.py
   Used by both the agent runtime and data loader.
 - SQL repair auto-expands from retrieved schema to full schema when needed.
 - DB execution pins `search_path` to `DB_SCHEMA` for safer schema isolation.
+  - `DB_SCHEMA` must be a single unquoted PostgreSQL schema identifier.
 - Graph now includes an intent step (`sql_query` / `sql_followup`) and a security preflight before query execution.
 - Follow-up memory is scoped by `thread_id` (default: `default`).
 - Follow-up memory is in-process and bounded (LRU-style by thread) to avoid unbounded growth.

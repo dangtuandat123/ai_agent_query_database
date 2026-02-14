@@ -152,3 +152,21 @@ def test_memory_max_threads_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEMORY_MAX_THREADS", "0")
     with pytest.raises(ValueError):
         load_settings()
+
+
+def test_db_schema_validation_accepts_valid_identifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_base_env(monkeypatch)
+    monkeypatch.setenv("DB_SCHEMA", "analytics_2024")
+    settings = load_settings()
+    assert settings.db_schema == "analytics_2024"
+
+
+def test_db_schema_validation_rejects_invalid_identifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_base_env(monkeypatch)
+    monkeypatch.setenv("DB_SCHEMA", "public;drop schema public")
+    with pytest.raises(ValueError):
+        load_settings()

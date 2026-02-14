@@ -38,8 +38,12 @@ def classify_sql_error(sql_error: str) -> str:
         "connection refused" in lowered
         or "could not connect" in lowered
         or "connection timeout" in lowered
+        or "connection timed out" in lowered
         or "connection is lost" in lowered
         or "server closed the connection unexpectedly" in lowered
+        or "could not translate host name" in lowered
+        or "temporary failure in name resolution" in lowered
+        or "name or service not known" in lowered
     ):
         return "connection"
     return "db"
