@@ -239,3 +239,28 @@ def test_schema_service_langchain_table_info_truncates() -> None:
 
     result = service.build_for_question("q")
     assert len(result.schema_context) <= 80
+
+
+def test_schema_service_reuses_cached_full_context() -> None:
+    tables = _tables()
+    db = FakeLangChainDB(
+        tables=tables,
+        table_info="CREATE TABLE public.taxi_trip_data (payment_type INTEGER);",
+    )
+    retriever = FakeRetriever([tables[0]])
+    service = SchemaService(
+        db=db,  # type: ignore[arg-type]
+        schema_retriever=retriever,  # type: ignore[arg-type]
+        db_schema="public",
+        max_columns_per_table=40,
+        context_max_chars=1000,
+        full_context_max_chars=3000,
+        top_k_tables=1,
+        cache_ttl_seconds=300,
+        logger=logging.getLogger("test.schema"),
+    )
+
+    _ = service.build_for_question("q1")
+    _ = service.build_for_question("q2")
+    # First run: schema_context + full_context. Second run: schema_context only.
+    assert db.info_calls == 3

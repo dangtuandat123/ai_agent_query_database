@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 
 VIETNAMESE_CHAR_PATTERN = re.compile(
@@ -23,6 +24,12 @@ VIETNAMESE_HINT_PATTERNS = [
     re.compile(r"\bdoanh\s+thu\b"),
     re.compile(r"\bdu\s+lieu\b"),
 ]
+
+
+def normalize_for_matching(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", text.lower())
+    without_marks = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    return without_marks.replace("đ", "d")
 
 
 def is_probably_vietnamese(text: str) -> bool:

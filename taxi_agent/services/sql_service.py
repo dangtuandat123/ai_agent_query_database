@@ -34,6 +34,14 @@ def classify_sql_error(sql_error: str) -> str:
         or "user not found" in lowered
     ):
         return "provider"
+    if (
+        "connection refused" in lowered
+        or "could not connect" in lowered
+        or "connection timeout" in lowered
+        or "connection is lost" in lowered
+        or "server closed the connection unexpectedly" in lowered
+    ):
+        return "connection"
     return "db"
 
 

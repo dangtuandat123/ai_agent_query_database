@@ -23,6 +23,7 @@ from .services.language_service import (
     fallback_no_data_message,
     fallback_success_message,
     internal_error_message,
+    normalize_for_matching,
     unsupported_message,
 )
 from .services.metadata_service import MetadataContextService
@@ -119,6 +120,9 @@ class TaxiDashboardAgent:
         self.metadata_service = MetadataContextService(max_chars=3000)
         self._conversation_memory: Dict[str, Dict[str, str]] = {}
         self._max_memory_threads = settings.memory_max_threads
+        self._memory_question_max_chars = 500
+        self._memory_sql_max_chars = 2000
+        self._memory_answer_max_chars = 1200
         self._memory_lock = threading.Lock()
 
         self.graph = self._build_graph()
@@ -154,9 +158,18 @@ class TaxiDashboardAgent:
                 self._conversation_memory.pop(oldest_thread_id, None)
 
             self._conversation_memory[thread_id] = {
-                "question": question,
-                "sql_query": sql_query,
-                "final_answer": final_answer,
+                "question": self._truncate_prompt_piece(
+                    question,
+                    max_chars=self._memory_question_max_chars,
+                ),
+                "sql_query": self._truncate_prompt_piece(
+                    sql_query,
+                    max_chars=self._memory_sql_max_chars,
+                ),
+                "final_answer": self._truncate_prompt_piece(
+                    final_answer,
+                    max_chars=self._memory_answer_max_chars,
+                ),
             }
 
     def _build_openrouter_headers(self, settings: Settings) -> Optional[Dict[str, str]]:
@@ -295,19 +308,23 @@ class TaxiDashboardAgent:
             return {"intent": decision.intent, "intent_reason": decision.reason}
         except Exception as exc:
             self.logger.warning("Intent router failed, fallback to sql_query: %s", exc)
-            lowered = question.lower()
+            normalized_question = normalize_for_matching(question)
             followup_hints = (
-                "còn",
-                "so sánh",
+                "con",
+                "so sanh",
                 "compare",
                 "what about",
                 "how about",
-                "tiếp",
+                "tiep",
                 "again",
                 "same filter",
+                "vs",
+                "voi truoc",
             )
             has_previous = bool(state.get("previous_question", "").strip())
-            is_followup = has_previous and any(hint in lowered for hint in followup_hints)
+            is_followup = has_previous and any(
+                hint in normalized_question for hint in followup_hints
+            )
             return {
                 "intent": "sql_followup" if is_followup else "sql_query",
                 "intent_reason": "Heuristic fallback",

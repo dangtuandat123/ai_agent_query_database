@@ -40,7 +40,7 @@ def main() -> int:
     for index, question in enumerate(QUESTIONS, start=1):
         print(f"\n--- Smoke case {index} ---")
         print(f"Q: {question}")
-        result = agent.ask(question)
+        result = agent.ask(question, thread_id=f"smoke-{index}")
         print(f"Route: {result.get('route', 'n/a')}")
         print(f"Attempts: {result.get('attempts', 0)}")
         display_sql = result.get("sql_query") or result.get("last_failed_sql") or "n/a"

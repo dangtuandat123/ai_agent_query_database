@@ -2,6 +2,7 @@ import argparse
 from dataclasses import replace
 
 from main import main as run_main
+from main import configure_stdout
 from taxi_agent.config import Settings
 
 
@@ -274,3 +275,15 @@ def test_main_prints_last_failed_sql_when_sql_query_empty(monkeypatch, capsys) -
     out = capsys.readouterr().out
     assert exit_code == 0
     assert "SQL: SELECT * FROM public.taxi_trip_data QUALIFY 1=1" in out
+
+
+def test_configure_stdout_tolerates_reconfigure_errors(monkeypatch) -> None:
+    class BrokenStream:
+        def reconfigure(self, **kwargs):
+            _ = kwargs
+            raise RuntimeError("stream does not support reconfigure")
+
+    monkeypatch.setattr("main.sys.stdout", BrokenStream())
+    monkeypatch.setattr("main.sys.stderr", BrokenStream())
+
+    configure_stdout()

@@ -5,6 +5,7 @@ from taxi_agent.services.language_service import (
     fallback_success_message,
     internal_error_message,
     is_probably_vietnamese,
+    normalize_for_matching,
     unsupported_message,
 )
 
@@ -49,3 +50,7 @@ def test_empty_question_message() -> None:
 def test_internal_error_message_vn_en() -> None:
     assert "lỗi nội bộ" in internal_error_message("Trong thang 3/2018 co bao nhieu chuyen?")
     assert "internal error" in internal_error_message("How many trips in March 2018?")
+
+
+def test_normalize_for_matching_strips_diacritics() -> None:
+    assert normalize_for_matching("Còn so sánh tiếp") == "con so sanh tiep"

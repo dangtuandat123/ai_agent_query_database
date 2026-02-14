@@ -1,4 +1,5 @@
 from typing import List
+import threading
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
@@ -209,3 +210,38 @@ def test_ensemble_retriever_preferred_when_available(monkeypatch) -> None:
     selected = retriever.retrieve_tables("any question")
     assert selected[0].table_name == "taxi_trip_data"
     assert FakeEnsembleRetriever.instances == 1
+
+
+def test_retriever_refresh_and_retrieve_thread_safe() -> None:
+    retriever = SchemaRetriever(
+        embedding_model=None,
+        config=SchemaRetrieverConfig(top_k_tables=1, search_type="mmr", fetch_k=20),
+    )
+    tables = _sample_tables()
+    errors: list[Exception] = []
+
+    def refresh_worker() -> None:
+        try:
+            for _ in range(10):
+                retriever.refresh(tables)
+        except Exception as exc:  # pragma: no cover
+            errors.append(exc)
+
+    def retrieve_worker() -> None:
+        try:
+            for _ in range(10):
+                retriever.retrieve_tables("payment type")
+        except Exception as exc:  # pragma: no cover
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=refresh_worker),
+        threading.Thread(target=retrieve_worker),
+        threading.Thread(target=retrieve_worker),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []

@@ -47,6 +47,9 @@ class SchemaService:
         self._cache_loaded: bool = False
         self._cache_expiry: float = 0.0
         self._cache_lock = threading.RLock()
+        self._cached_schema_overview: str = "No schema overview available."
+        self._cached_all_allowed_tables: List[str] = []
+        self._cached_full_context: str = ""
 
     @staticmethod
     def _truncate_text(value: str, max_chars: int) -> str:
@@ -104,6 +107,9 @@ class SchemaService:
             self._cached_tables = list(tables)
             self._cache_loaded = True
             self._cache_expiry = monotonic() + self.cache_ttl_seconds
+            self._cached_schema_overview = build_schema_overview(tables=self._cached_tables)
+            self._cached_all_allowed_tables = self._build_allowlist(self._cached_tables)
+            self._cached_full_context = ""
             self.logger.info(
                 "Loaded %d tables for schema '%s'.",
                 len(self._cached_tables),
@@ -116,6 +122,9 @@ class SchemaService:
             self._cached_tables = []
             self._cache_loaded = False
             self._cache_expiry = 0.0
+            self._cached_schema_overview = "No schema overview available."
+            self._cached_all_allowed_tables = []
+            self._cached_full_context = ""
 
     @staticmethod
     def _build_allowlist(tables: Sequence[TableSchema]) -> List[str]:
@@ -124,6 +133,25 @@ class SchemaService:
             allowed.append(table.table_name.lower())
             allowed.append(table.full_name.lower())
         return sorted(set(allowed))
+
+    def _get_cached_schema_overview(self) -> str:
+        with self._cache_lock:
+            return self._cached_schema_overview
+
+    def _get_cached_all_allowed_tables(self) -> List[str]:
+        with self._cache_lock:
+            return list(self._cached_all_allowed_tables)
+
+    def _get_full_schema_context(self, all_tables: Sequence[TableSchema]) -> str:
+        with self._cache_lock:
+            if self._cached_full_context:
+                return self._cached_full_context
+
+            self._cached_full_context = self._build_context_with_fallback(
+                tables=all_tables,
+                max_chars=self.full_context_max_chars,
+            )
+            return self._cached_full_context
 
     def build_for_question(self, question: str) -> SchemaContextResult:
         try:
@@ -167,17 +195,16 @@ class SchemaService:
             relevant_tables = all_tables[: self.top_k_tables]
 
         allowed_tables = self._build_allowlist(relevant_tables)
-        all_allowed_tables = self._build_allowlist(all_tables)
+        all_allowed_tables = self._get_cached_all_allowed_tables()
+        if not all_allowed_tables:
+            all_allowed_tables = self._build_allowlist(all_tables)
 
         schema_context = self._build_context_with_fallback(
             tables=relevant_tables,
             max_chars=self.context_max_chars,
         )
-        schema_context_full = self._build_context_with_fallback(
-            tables=all_tables,
-            max_chars=self.full_context_max_chars,
-        )
-        schema_overview = build_schema_overview(tables=all_tables)
+        schema_context_full = self._get_full_schema_context(all_tables)
+        schema_overview = self._get_cached_schema_overview()
 
         return SchemaContextResult(
             schema_error="",

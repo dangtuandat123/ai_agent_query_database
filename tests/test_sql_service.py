@@ -36,6 +36,7 @@ def test_classify_sql_error() -> None:
     assert classify_sql_error("Only SELECT queries are allowed.") == "guard"
     assert classify_sql_error("statement timeout") == "timeout"
     assert classify_sql_error("Error code: 401 - User not found.") == "provider"
+    assert classify_sql_error("connection refused") == "connection"
     assert classify_sql_error("relation does not exist") == "db"
     assert classify_sql_error('relation "only_table" does not exist') == "db"
 

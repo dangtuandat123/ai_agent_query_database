@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import logging
+import threading
 from typing import Dict, List, Optional, Sequence
 
 from langchain_core.documents import Document
@@ -41,6 +42,7 @@ class SchemaRetriever:
         self.ensemble_retriever = None
         self.schema_fingerprint: str = ""
         self._bm25_dependency_missing = False
+        self._state_lock = threading.RLock()
 
     def _make_schema_fingerprint(self, tables: Sequence[TableSchema]) -> str:
         parts = []
@@ -66,128 +68,130 @@ class SchemaRetriever:
         )
 
     def refresh(self, tables: Sequence[TableSchema]) -> None:
-        self.table_map = {t.full_name.lower(): t for t in tables}
-        fingerprint = self._make_schema_fingerprint(tables)
-        if fingerprint == self.schema_fingerprint:
-            has_vector = self.retriever is not None
-            has_keyword = self.keyword_retriever is not None
-            vector_expected = self.embedding_model is not None
-            keyword_expected = (
-                BM25Retriever is not None and not self._bm25_dependency_missing
-            )
-            vector_ready = (not vector_expected) or has_vector
-            keyword_ready = (not keyword_expected) or has_keyword
-            if vector_ready and keyword_ready:
-                return
-
-        self.schema_fingerprint = fingerprint
-        docs = [self._table_to_document(t) for t in tables]
-
-        if BM25Retriever is not None and not self._bm25_dependency_missing:
-            try:
-                bm25 = BM25Retriever.from_documents(docs)
-                bm25.k = self.config.top_k_tables
-                self.keyword_retriever = bm25
-            except Exception as exc:
-                if isinstance(exc, ImportError):
-                    self._bm25_dependency_missing = True
-                self.logger.warning(
-                    "BM25 retriever unavailable; fallback to vector-only retrieval: %s",
-                    exc,
+        with self._state_lock:
+            self.table_map = {t.full_name.lower(): t for t in tables}
+            fingerprint = self._make_schema_fingerprint(tables)
+            if fingerprint == self.schema_fingerprint:
+                has_vector = self.retriever is not None
+                has_keyword = self.keyword_retriever is not None
+                vector_expected = self.embedding_model is not None
+                keyword_expected = (
+                    BM25Retriever is not None and not self._bm25_dependency_missing
                 )
-                self.keyword_retriever = None
-        else:
-            self.keyword_retriever = None
+                vector_ready = (not vector_expected) or has_vector
+                keyword_ready = (not keyword_expected) or has_keyword
+                if vector_ready and keyword_ready:
+                    return
 
-        if not self.embedding_model:
-            self.retriever = None
-        else:
-            try:
-                vectorstore = InMemoryVectorStore(self.embedding_model)
-                ids = [t.full_name.lower() for t in tables]
-                vectorstore.add_documents(docs, ids=ids)
+            self.schema_fingerprint = fingerprint
+            docs = [self._table_to_document(t) for t in tables]
 
-                search_kwargs = {"k": self.config.top_k_tables}
-                if self.config.search_type == "mmr":
-                    search_kwargs["fetch_k"] = max(
-                        self.config.fetch_k,
-                        self.config.top_k_tables * 4,
-                    )
-
-                self.retriever = vectorstore.as_retriever(
-                    search_type=self.config.search_type,
-                    search_kwargs=search_kwargs,
-                )
-            except Exception as exc:
-                # If embeddings are unavailable at runtime, keep keyword retriever only.
-                self.logger.warning(
-                    "Vector retriever unavailable; fallback to BM25-only retrieval: %s",
-                    exc,
-                )
-                self.retriever = None
-
-        self.ensemble_retriever = None
-        if EnsembleRetriever is not None:
-            retrievers = []
-            if self.retriever is not None:
-                retrievers.append(self.retriever)
-            if self.keyword_retriever is not None:
-                retrievers.append(self.keyword_retriever)
-
-            if len(retrievers) >= 2:
+            if BM25Retriever is not None and not self._bm25_dependency_missing:
                 try:
-                    self.ensemble_retriever = EnsembleRetriever(
-                        retrievers=retrievers,
-                        weights=[1.0] * len(retrievers),
-                    )
+                    bm25 = BM25Retriever.from_documents(docs)
+                    bm25.k = self.config.top_k_tables
+                    self.keyword_retriever = bm25
                 except Exception as exc:
+                    if isinstance(exc, ImportError):
+                        self._bm25_dependency_missing = True
                     self.logger.warning(
-                        "Ensemble retriever unavailable; fallback to independent retrieval: %s",
+                        "BM25 retriever unavailable; fallback to vector-only retrieval: %s",
                         exc,
                     )
-                    self.ensemble_retriever = None
+                    self.keyword_retriever = None
+            else:
+                self.keyword_retriever = None
+
+            if not self.embedding_model:
+                self.retriever = None
+            else:
+                try:
+                    vectorstore = InMemoryVectorStore(self.embedding_model)
+                    ids = [t.full_name.lower() for t in tables]
+                    vectorstore.add_documents(docs, ids=ids)
+
+                    search_kwargs = {"k": self.config.top_k_tables}
+                    if self.config.search_type == "mmr":
+                        search_kwargs["fetch_k"] = max(
+                            self.config.fetch_k,
+                            self.config.top_k_tables * 4,
+                        )
+
+                    self.retriever = vectorstore.as_retriever(
+                        search_type=self.config.search_type,
+                        search_kwargs=search_kwargs,
+                    )
+                except Exception as exc:
+                    # If embeddings are unavailable at runtime, keep keyword retriever only.
+                    self.logger.warning(
+                        "Vector retriever unavailable; fallback to BM25-only retrieval: %s",
+                        exc,
+                    )
+                    self.retriever = None
+
+            self.ensemble_retriever = None
+            if EnsembleRetriever is not None:
+                retrievers = []
+                if self.retriever is not None:
+                    retrievers.append(self.retriever)
+                if self.keyword_retriever is not None:
+                    retrievers.append(self.keyword_retriever)
+
+                if len(retrievers) >= 2:
+                    try:
+                        self.ensemble_retriever = EnsembleRetriever(
+                            retrievers=retrievers,
+                            weights=[1.0] * len(retrievers),
+                        )
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Ensemble retriever unavailable; fallback to independent retrieval: %s",
+                            exc,
+                        )
+                        self.ensemble_retriever = None
 
     def retrieve_tables(self, question: str) -> List[TableSchema]:
-        if not self.table_map:
-            return []
+        with self._state_lock:
+            if not self.table_map:
+                return []
 
-        docs: List[Document] = []
-        if self.ensemble_retriever is not None:
-            try:
-                docs = list(self.ensemble_retriever.invoke(question))
-            except Exception:
-                docs = []
-        else:
-            if self.retriever is not None:
+            docs: List[Document] = []
+            if self.ensemble_retriever is not None:
                 try:
-                    docs.extend(self.retriever.invoke(question))
+                    docs = list(self.ensemble_retriever.invoke(question))
                 except Exception:
-                    pass
+                    docs = []
+            else:
+                if self.retriever is not None:
+                    try:
+                        docs.extend(self.retriever.invoke(question))
+                    except Exception:
+                        pass
 
-            if self.keyword_retriever is not None:
-                try:
-                    docs.extend(self.keyword_retriever.invoke(question))
-                except Exception:
-                    pass
+                if self.keyword_retriever is not None:
+                    try:
+                        docs.extend(self.keyword_retriever.invoke(question))
+                    except Exception:
+                        pass
 
-        if not docs:
+            if not docs:
+                return list(self.table_map.values())[: self.config.top_k_tables]
+
+            selected: List[TableSchema] = []
+            seen = set()
+            for doc in docs:
+                key = str(doc.metadata.get("full_name", "")).lower()
+                if key in seen:
+                    continue
+                table = self.table_map.get(key)
+                if table is None:
+                    continue
+                seen.add(key)
+                selected.append(table)
+                if len(selected) >= self.config.top_k_tables:
+                    break
+
+            if selected:
+                return selected
+
             return list(self.table_map.values())[: self.config.top_k_tables]
-
-        selected: List[TableSchema] = []
-        seen = set()
-        for doc in docs:
-            key = str(doc.metadata.get("full_name", "")).lower()
-            if key in seen:
-                continue
-            table = self.table_map.get(key)
-            if table is None:
-                continue
-            seen.add(key)
-            selected.append(table)
-            if len(selected) >= self.config.top_k_tables:
-                break
-
-        if selected:
-            return selected
-
-        return list(self.table_map.values())[: self.config.top_k_tables]

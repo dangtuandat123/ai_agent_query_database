@@ -37,9 +37,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def configure_stdout() -> None:
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8")
+        try:
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
 
 
 def configure_logging(level: str) -> None:
