@@ -120,11 +120,12 @@ class SQLService:
         except Exception as exc:
             msg = f"SQL generation failed: {exc}"
             self.logger.error(msg)
+            err_type = classify_sql_error(str(exc))
             return {
                 "sql_query": "",
                 "sql_reasoning": "",
                 "sql_error": msg,
-                "sql_error_type": "generation",
+                "sql_error_type": err_type if err_type == "provider" else "generation",
                 "sql_error_message": str(exc),
             }
 

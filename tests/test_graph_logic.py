@@ -38,6 +38,12 @@ class FakeDB:
         return self.rows
 
 
+class ConnectionFailDB(FakeDB):
+    def run_query(self, sql: str) -> List[dict[str, Any]]:
+        self.queries.append(sql)
+        raise RuntimeError("connection refused")
+
+
 class FakeLLM:
     def __init__(
         self,
@@ -96,6 +102,13 @@ class FakeLLM:
         if self.fail_answer:
             raise RuntimeError("LLM answer failure")
         return SimpleNamespace(content=self.answer_text)
+
+
+class ProviderFailLLM(FakeLLM):
+    def _invoke_sql(self, messages: Any) -> Any:
+        _ = messages
+        self.sql_calls += 1
+        raise RuntimeError("401 Unauthorized")
 
 
 def _settings() -> Settings:
@@ -321,6 +334,53 @@ def test_graph_generation_error_then_regenerate_success() -> None:
     assert result["final_answer"] == "done"
     assert len(fake_db.queries) == 1
     assert fake_llm.sql_calls == 2
+
+
+def test_graph_provider_generation_error_fails_fast_without_repair() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = ProviderFailLLM(route="sql")
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    s = replace(_settings(), max_sql_retries=3)
+    agent = TaxiDashboardAgent(
+        s,
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Do a SQL query")
+
+    assert result["sql_error_type"] == "provider"
+    assert result["attempts"] == 0
+    assert fake_llm.sql_calls == 1
+    assert fake_db.queries == []
+
+
+def test_graph_connection_error_fails_fast_without_repair() -> None:
+    tables = _tables()
+    fake_db = ConnectionFailDB(tables=tables, rows=[])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    s = replace(_settings(), max_sql_retries=3)
+    agent = TaxiDashboardAgent(
+        s,
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Show one row")
+
+    assert result["sql_error_type"] == "connection"
+    assert result["attempts"] == 0
+    assert fake_llm.sql_calls == 1
 
 
 def test_graph_followup_intent_uses_previous_turn_context() -> None:

@@ -31,6 +31,13 @@ class FakeSQLLLM:
         return SimpleNamespace(sql=self.sql, reasoning="ok")
 
 
+class ProviderFailSQLLLM(FakeSQLLLM):
+    def invoke(self, messages: Any) -> Any:
+        self.last_messages = messages
+        _ = messages
+        raise RuntimeError("401 Unauthorized")
+
+
 def test_classify_sql_error() -> None:
     assert classify_sql_error("outside allowed schema context") == "allowlist"
     assert classify_sql_error("Only SELECT queries are allowed.") == "guard"
@@ -118,6 +125,21 @@ def test_generate_sql_empty_output_is_generation_error() -> None:
     )
     assert result["sql_error_type"] == "generation"
     assert "empty sql" in result["sql_error"].lower()
+
+
+def test_generate_sql_provider_error_classification() -> None:
+    service = SQLService(
+        sql_llm=ProviderFailSQLLLM(),
+        db=FakeDB(),  # type: ignore[arg-type]
+        logger=logging.getLogger("test.sql"),
+    )
+    result = service.generate_sql(
+        question="q",
+        schema_context="Table: public.taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+    )
+    assert result["sql_error_type"] == "provider"
+    assert "401" in result["sql_error"]
 
 
 def test_repair_sql_empty_output_is_repair_error() -> None:

@@ -59,6 +59,8 @@ def _stringify_content(content: Any) -> str:
 
 
 class TaxiDashboardAgent:
+    NON_REPAIRABLE_ERROR_TYPES = {"provider", "connection"}
+
     def __init__(
         self,
         settings: Settings,
@@ -490,6 +492,8 @@ class TaxiDashboardAgent:
         sql_error = state.get("sql_error")
         if not sql_error:
             return "execute"
+        if state.get("sql_error_type", "") in self.NON_REPAIRABLE_ERROR_TYPES:
+            return "failed"
         attempts = state.get("attempts", 0)
         if attempts < self.settings.max_sql_retries:
             return "retry"
@@ -499,6 +503,8 @@ class TaxiDashboardAgent:
         sql_error = state.get("sql_error")
         if not sql_error:
             return "success"
+        if state.get("sql_error_type", "") in self.NON_REPAIRABLE_ERROR_TYPES:
+            return "failed"
 
         attempts = state.get("attempts", 0)
         if attempts < self.settings.max_sql_retries:
