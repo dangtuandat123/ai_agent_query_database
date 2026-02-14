@@ -75,6 +75,19 @@ def _get_csv_path() -> Path:
     return DEFAULT_CSV_PATH
 
 
+def _get_connect_timeout_seconds() -> int:
+    raw = os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10").strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"DB_CONNECT_TIMEOUT_SECONDS must be an integer, got: {raw!r}"
+        ) from exc
+    if value < 1:
+        raise ValueError(f"DB_CONNECT_TIMEOUT_SECONDS must be >= 1, got: {value}")
+    return value
+
+
 def _count_rows(conn: psycopg.Connection) -> int:
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM taxi_trip_data")
@@ -87,13 +100,17 @@ def main() -> None:
     postgres_dsn = os.getenv(
         "POSTGRES_DSN", "postgresql://postgres:postgres@localhost:5432/taxi_db"
     )
+    connect_timeout_seconds = _get_connect_timeout_seconds()
     import_mode = _get_import_mode()
     csv_path = _get_csv_path()
     if not csv_path.exists():
         raise FileNotFoundError(f"Cannot find CSV file: {csv_path}")
 
     print("Connecting PostgreSQL...")
-    with psycopg.connect(postgres_dsn) as conn:
+    with psycopg.connect(
+        postgres_dsn,
+        connect_timeout=connect_timeout_seconds,
+    ) as conn:
         with conn.cursor() as cur:
             cur.execute(CREATE_TABLE_SQL)
             conn.commit()

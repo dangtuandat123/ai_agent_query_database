@@ -72,6 +72,12 @@ Optional question override:
 python main.py --question "For March 2018, top payment type by revenue?"
 ```
 
+Optional thread id (for follow-up context continuity within same process):
+
+```bash
+python main.py --thread-id finance-team
+```
+
 CLI help:
 
 ```bash
@@ -103,9 +109,12 @@ python smoke_run.py
 - Agent retries SQL generation when query fails (`MAX_SQL_RETRIES`).
 - Query timeout is configurable via `QUERY_TIMEOUT_MS` (default: 30000ms).
 - DB connect timeout is configurable via `DB_CONNECT_TIMEOUT_SECONDS` (default: 10s).
+  Used by both the agent runtime and data loader.
 - SQL repair auto-expands from retrieved schema to full schema when needed.
 - DB execution pins `search_path` to `DB_SCHEMA` for safer schema isolation.
 - Graph now includes an intent step (`sql_query` / `sql_followup`) and a security preflight before query execution.
+- Follow-up memory is scoped by `thread_id` (default: `default`).
+- Follow-up memory is in-process and bounded (LRU-style by thread) to avoid unbounded growth.
 - Data loader supports safe modes with `IMPORT_MODE`: `fail_if_exists`, `truncate`, `append`.
 - Optional CSV path override for loader/preview via `TAXI_CSV_PATH`
   (relative paths are resolved from project root).

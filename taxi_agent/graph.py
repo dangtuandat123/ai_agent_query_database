@@ -116,9 +116,45 @@ class TaxiDashboardAgent:
             row_limit=settings.query_row_limit,
         )
         self.metadata_service = MetadataContextService(max_chars=3000)
-        self._last_success_turn: Dict[str, str] = {}
+        self._conversation_memory: Dict[str, Dict[str, str]] = {}
+        self._max_memory_threads = 200
 
         self.graph = self._build_graph()
+
+    @staticmethod
+    def _normalize_thread_id(thread_id: str) -> str:
+        normalized = (thread_id or "").strip()
+        return normalized or "default"
+
+    @staticmethod
+    def _truncate_prompt_piece(value: str, max_chars: int = 1200) -> str:
+        text = value.strip()
+        if len(text) <= max_chars:
+            return text
+        if max_chars <= 3:
+            return text[:max_chars]
+        return text[: max_chars - 3].rstrip() + "..."
+
+    def _remember_success_turn(
+        self,
+        *,
+        thread_id: str,
+        question: str,
+        sql_query: str,
+        final_answer: str,
+    ) -> None:
+        if thread_id in self._conversation_memory:
+            # Move existing thread to the end (most recent).
+            self._conversation_memory.pop(thread_id, None)
+        elif len(self._conversation_memory) >= self._max_memory_threads:
+            oldest_thread_id = next(iter(self._conversation_memory))
+            self._conversation_memory.pop(oldest_thread_id, None)
+
+        self._conversation_memory[thread_id] = {
+            "question": question,
+            "sql_query": sql_query,
+            "final_answer": final_answer,
+        }
 
     def _build_openrouter_headers(self, settings: Settings) -> Optional[Dict[str, str]]:
         default_headers: Dict[str, str] = {}
@@ -213,15 +249,22 @@ class TaxiDashboardAgent:
         return {"metadata_context": context}
 
     def _build_previous_context_text(self, state: DashboardState) -> str:
-        previous_question = state.get("previous_question", "").strip()
-        previous_sql_query = state.get("previous_sql_query", "").strip()
-        previous_final_answer = state.get("previous_final_answer", "").strip()
+        previous_question = self._truncate_prompt_piece(
+            state.get("previous_question", "")
+        )
+        previous_sql_query = self._truncate_prompt_piece(
+            state.get("previous_sql_query", "")
+        )
+        previous_final_answer = self._truncate_prompt_piece(
+            state.get("previous_final_answer", ""),
+            max_chars=800,
+        )
         if not previous_question and not previous_sql_query and not previous_final_answer:
             return "No previous conversation context."
         return (
             f"Previous question: {previous_question or 'n/a'}\n"
             f"Previous SQL: {previous_sql_query or 'n/a'}\n"
-            f"Previous answer summary: {previous_final_answer[:500] or 'n/a'}"
+            f"Previous answer summary: {previous_final_answer or 'n/a'}"
         )
 
     def _determine_intent(self, state: DashboardState) -> DashboardState:
@@ -396,7 +439,11 @@ class TaxiDashboardAgent:
             return {"final_answer": fallback_success_message(question, len(rows))}
 
     def _unsupported_answer(self, state: DashboardState) -> DashboardState:
-        reason = state.get("route_reason") or "Unsupported question for current schema."
+        reason = (
+            state.get("intent_reason")
+            or state.get("route_reason")
+            or "Unsupported question for current schema."
+        )
         question = state.get("question", "")
         return {"final_answer": unsupported_message(question, reason)}
 
@@ -498,7 +545,7 @@ class TaxiDashboardAgent:
 
         return builder.compile()
 
-    def ask(self, question: str) -> AgentResult:
+    def ask(self, question: str, thread_id: str = "default") -> AgentResult:
         clean_question = question.strip()
         if not clean_question:
             self.logger.warning("Received empty question.")
@@ -513,12 +560,15 @@ class TaxiDashboardAgent:
                 },
             )
 
+        normalized_thread_id = self._normalize_thread_id(thread_id)
+        previous_turn = self._conversation_memory.get(normalized_thread_id, {})
         initial_state: DashboardState = {
             "question": clean_question,
+            "thread_id": normalized_thread_id,
             "attempts": 0,
-            "previous_question": self._last_success_turn.get("question", ""),
-            "previous_sql_query": self._last_success_turn.get("sql_query", ""),
-            "previous_final_answer": self._last_success_turn.get("final_answer", ""),
+            "previous_question": previous_turn.get("question", ""),
+            "previous_sql_query": previous_turn.get("sql_query", ""),
+            "previous_final_answer": previous_turn.get("final_answer", ""),
         }
         try:
             result = self.graph.invoke(initial_state)
@@ -527,11 +577,12 @@ class TaxiDashboardAgent:
                 and not result.get("sql_error")
                 and result.get("sql_query")
             ):
-                self._last_success_turn = {
-                    "question": clean_question,
-                    "sql_query": str(result.get("sql_query", "")),
-                    "final_answer": str(result.get("final_answer", "")),
-                }
+                self._remember_success_turn(
+                    thread_id=normalized_thread_id,
+                    question=clean_question,
+                    sql_query=str(result.get("sql_query", "")),
+                    final_answer=str(result.get("final_answer", "")),
+                )
             return cast(AgentResult, result)
         except Exception as exc:
             self.logger.exception("Graph execution failed: %s", exc)
@@ -558,3 +609,10 @@ class TaxiDashboardAgent:
         path = Path(file_path)
         path.write_text(mermaid, encoding="utf-8")
         return str(path.resolve())
+
+    def clear_thread_memory(self, thread_id: Optional[str] = None) -> None:
+        if thread_id is None:
+            self._conversation_memory.clear()
+            return
+        normalized_thread_id = self._normalize_thread_id(thread_id)
+        self._conversation_memory.pop(normalized_thread_id, None)

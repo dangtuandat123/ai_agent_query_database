@@ -7,6 +7,23 @@ DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
 QUARTER_PATTERN = re.compile(r"\bq[1-4]\s*20\d{2}\b", re.IGNORECASE)
 YEAR_MONTH_PATTERN = re.compile(r"\b(?:19|20)\d{2}[/-](?:0?[1-9]|1[0-2])\b")
 QUOTED_VALUE_PATTERN = re.compile(r"[\"']([^\"']{1,80})[\"']")
+GENERIC_STOPWORDS = {
+    "table",
+    "tables",
+    "column",
+    "columns",
+    "select",
+    "from",
+    "where",
+    "group",
+    "order",
+    "limit",
+    "public",
+    "integer",
+    "double",
+    "precision",
+    "text",
+}
 
 
 def _tokenize(text: str) -> List[str]:
@@ -49,7 +66,7 @@ class MetadataContextService:
             {
                 token
                 for token in question_tokens
-                if token in schema_tokens and token not in {"select", "from", "where"}
+                if token in schema_tokens and token not in GENERIC_STOPWORDS
             }
         )[:20]
 

@@ -3,6 +3,7 @@ from typing import Any, Dict, List, TypedDict
 
 class DashboardState(TypedDict, total=False):
     question: str
+    thread_id: str
     route: str
     route_reason: str
     intent: str

@@ -17,6 +17,17 @@ def test_get_import_mode_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
         loader._get_import_mode()
 
 
+def test_loader_connect_timeout_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DB_CONNECT_TIMEOUT_SECONDS", raising=False)
+    assert loader._get_connect_timeout_seconds() == 10
+
+
+def test_loader_connect_timeout_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DB_CONNECT_TIMEOUT_SECONDS", "0")
+    with pytest.raises(ValueError):
+        loader._get_connect_timeout_seconds()
+
+
 def test_loader_get_csv_path_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TAXI_CSV_PATH", raising=False)
     csv_path = loader._get_csv_path()

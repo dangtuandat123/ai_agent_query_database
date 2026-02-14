@@ -183,6 +183,29 @@ def test_graph_unsupported_route() -> None:
     assert "cannot answer" in result["final_answer"].lower()
 
 
+def test_graph_unsupported_intent_uses_intent_reason() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="unsupported",
+        intent_reason="Follow-up requires prior context but none exists.",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Compare with previous result")
+
+    assert result["route"] == "sql"
+    assert result["intent"] == "unsupported"
+    assert "prior context" in result["final_answer"].lower()
+
+
 def test_graph_answer_fallback_when_llm_fails() -> None:
     tables = _tables()
     fake_db = FakeDB(tables=tables, rows=[{"id": 1}, {"id": 2}])
@@ -301,6 +324,90 @@ def test_graph_followup_intent_uses_previous_turn_context() -> None:
     assert second["intent"] == "sql_followup"
     assert second["previous_question"] == "Show one row from table_a"
     assert "table_b" in second["sql_query"].lower()
+
+
+def test_graph_thread_memory_is_isolated() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+
+    _ = agent.ask("first question in thread A", thread_id="thread-a")
+    second_a = agent.ask("second question in thread A", thread_id="thread-a")
+    first_b = agent.ask("first question in thread B", thread_id="thread-b")
+
+    assert second_a["previous_question"] == "first question in thread A"
+    assert first_b["previous_question"] == ""
+
+
+def test_graph_thread_memory_can_be_cleared() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+
+    _ = agent.ask("first in A", thread_id="thread-a")
+    _ = agent.ask("first in B", thread_id="thread-b")
+    agent.clear_thread_memory("thread-a")
+    next_a = agent.ask("second in A", thread_id="thread-a")
+    next_b = agent.ask("second in B", thread_id="thread-b")
+
+    assert next_a["previous_question"] == ""
+    assert next_b["previous_question"] == "first in B"
+
+
+def test_graph_thread_memory_eviction_by_capacity() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    agent._max_memory_threads = 1
+
+    _ = agent.ask("thread A q1", thread_id="thread-a")
+    _ = agent.ask("thread B q1", thread_id="thread-b")
+    next_a = agent.ask("thread A q2", thread_id="thread-a")
+
+    # Thread A was evicted after thread B update, so no previous context.
+    assert next_a["previous_question"] == ""
 
 
 def test_graph_repair_path_rechecks_security_guard() -> None:

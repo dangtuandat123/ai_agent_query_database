@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import logging
 import sys
 
@@ -25,6 +26,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="",
         help="Optional input question (VN/EN).",
+    )
+    parser.add_argument(
+        "--thread-id",
+        type=str,
+        default="default",
+        help="Optional conversation thread id for follow-up context.",
     )
     return parser.parse_args(argv)
 
@@ -55,6 +62,7 @@ def main() -> None:
     configure_logging(settings.log_level)
 
     question = args.question.strip() or DEFAULT_TEST_QUESTION
+    thread_id = (getattr(args, "thread_id", "default") or "default").strip() or "default"
 
     agent = TaxiDashboardAgent(settings)
     try:
@@ -70,10 +78,16 @@ def main() -> None:
         )
         print(f"Workflow render/save skipped due to error: {exc}\n")
 
-    result = agent.ask(question)
+    ask_signature = inspect.signature(agent.ask)
+    if "thread_id" in ask_signature.parameters:
+        result = agent.ask(question, thread_id=thread_id)
+    else:
+        # Backward compatibility for older agent signatures.
+        result = agent.ask(question)
 
     print("=== Taxi Agent Database Dashboard ===")
     print(f"Question: {question}")
+    print(f"Thread ID: {thread_id}")
     print(f"Route: {result.get('route', 'n/a')}")
     if result.get("intent"):
         print(f"Intent: {result.get('intent', 'n/a')}")

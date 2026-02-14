@@ -63,3 +63,43 @@ def test_main_workflow_render_failure_still_runs(monkeypatch, capsys) -> None:
     assert "Question: abc" in out
     assert "Route: sql" in out
     assert "ok: abc" in out
+
+
+def test_main_passes_thread_id_when_supported(monkeypatch, capsys) -> None:
+    captured = {"thread_id": ""}
+
+    class FakeAgent:
+        def __init__(self, settings: Settings) -> None:
+            _ = settings
+
+        def get_workflow_mermaid(self) -> str:
+            return "graph TD;"
+
+        def save_workflow_mermaid(self, file_path: str = "agent_workflow.mmd") -> str:
+            _ = file_path
+            return "agent_workflow.mmd"
+
+        def ask(self, question: str, thread_id: str = "default"):
+            captured["thread_id"] = thread_id
+            return {
+                "route": "sql",
+                "intent": "sql_query",
+                "sql_query": "SELECT 1",
+                "final_answer": f"ok: {question}",
+                "sql_rows": [],
+                "sql_error": "",
+            }
+
+    monkeypatch.setattr(
+        "main.parse_args",
+        lambda: argparse.Namespace(question="abc", thread_id="team-finance"),
+    )
+    monkeypatch.setattr("main.load_dotenv", lambda: None)
+    monkeypatch.setattr("main.load_settings", _settings)
+    monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
+
+    run_main()
+    out = capsys.readouterr().out
+
+    assert captured["thread_id"] == "team-finance"
+    assert "Thread ID: team-finance" in out
