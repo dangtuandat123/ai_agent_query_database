@@ -54,11 +54,15 @@ def configure_logging(level: str) -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-def main() -> None:
+def main() -> int:
     configure_stdout()
     args = parse_args()
     load_dotenv()
-    settings = load_settings()
+    try:
+        settings = load_settings()
+    except Exception as exc:
+        print(f"Configuration error: {exc}")
+        return 1
     configure_logging(settings.log_level)
 
     question = args.question.strip() or DEFAULT_TEST_QUESTION
@@ -78,16 +82,27 @@ def main() -> None:
         )
         print(f"Workflow render/save skipped due to error: {exc}\n")
 
-    ask_signature = inspect.signature(agent.ask)
-    if "thread_id" in ask_signature.parameters:
+    try:
+        ask_signature = inspect.signature(agent.ask)
+        supports_thread_id = "thread_id" in ask_signature.parameters
+    except (TypeError, ValueError):
+        supports_thread_id = False
+
+    if supports_thread_id:
         result = agent.ask(question, thread_id=thread_id)
+        effective_thread_id = thread_id
     else:
-        # Backward compatibility for older agent signatures.
+        # Backward compatibility for older/opaque agent signatures.
         result = agent.ask(question)
+        effective_thread_id = "default"
+        if thread_id != "default":
+            logging.getLogger(__name__).warning(
+                "Agent.ask() signature does not expose thread_id; using default thread.",
+            )
 
     print("=== Taxi Agent Database Dashboard ===")
     print(f"Question: {question}")
-    print(f"Thread ID: {thread_id}")
+    print(f"Thread ID: {effective_thread_id}")
     print(f"Route: {result.get('route', 'n/a')}")
     if result.get("intent"):
         print(f"Intent: {result.get('intent', 'n/a')}")
@@ -104,7 +119,8 @@ def main() -> None:
     sql_error = result.get("sql_error")
     if sql_error:
         print(f"\nSQL error: {sql_error}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -24,6 +24,7 @@ def _set_base_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SCHEMA_RETRIEVER_SEARCH_TYPE", "mmr")
     monkeypatch.setenv("SCHEMA_RETRIEVER_FETCH_K", "20")
     monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("MEMORY_MAX_THREADS", "200")
 
 
 def test_load_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -35,6 +36,7 @@ def test_load_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.schema_full_context_max_chars == 30000
     assert settings.log_level == "INFO"
     assert settings.db_connect_timeout_seconds == 10
+    assert settings.memory_max_threads == 200
 
 
 def test_load_settings_invalid_int(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,5 +136,19 @@ def test_db_connect_timeout_override(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_db_connect_timeout_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_base_env(monkeypatch)
     monkeypatch.setenv("DB_CONNECT_TIMEOUT_SECONDS", "0")
+    with pytest.raises(ValueError):
+        load_settings()
+
+
+def test_memory_max_threads_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_base_env(monkeypatch)
+    monkeypatch.setenv("MEMORY_MAX_THREADS", "50")
+    settings = load_settings()
+    assert settings.memory_max_threads == 50
+
+
+def test_memory_max_threads_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_base_env(monkeypatch)
+    monkeypatch.setenv("MEMORY_MAX_THREADS", "0")
     with pytest.raises(ValueError):
         load_settings()

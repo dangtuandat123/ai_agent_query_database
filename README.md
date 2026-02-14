@@ -130,5 +130,6 @@ python smoke_run.py
   - `SCHEMA_RETRIEVER_SEARCH_TYPE` (`mmr` or `similarity`)
   - `SCHEMA_RETRIEVER_FETCH_K` (used when search type is `mmr`)
   - `LOG_LEVEL`
+  - `MEMORY_MAX_THREADS`
 - If `rank_bm25` is missing in your environment, retriever auto-falls back to vector-only and logs a warning.
 - `.env`, dataset files, caches, and generated workflow files are ignored via `.gitignore`.

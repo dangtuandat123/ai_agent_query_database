@@ -26,6 +26,7 @@ class Settings:
     schema_retriever_fetch_k: int
     log_level: str
     db_connect_timeout_seconds: int = 10
+    memory_max_threads: int = 200
 
 
 def _get_int_env(name: str, default: int, min_value: int = 1) -> int:
@@ -124,6 +125,7 @@ def load_settings() -> Settings:
     schema_retriever_fetch_k = _get_int_env("SCHEMA_RETRIEVER_FETCH_K", 20)
     log_level = _get_log_level_env("LOG_LEVEL", "INFO")
     db_connect_timeout_seconds = _get_int_env("DB_CONNECT_TIMEOUT_SECONDS", 10)
+    memory_max_threads = _get_int_env("MEMORY_MAX_THREADS", 200)
 
     return Settings(
         postgres_dsn=postgres_dsn,
@@ -147,4 +149,5 @@ def load_settings() -> Settings:
         schema_retriever_fetch_k=schema_retriever_fetch_k,
         log_level=log_level,
         db_connect_timeout_seconds=db_connect_timeout_seconds,
+        memory_max_threads=memory_max_threads,
     )

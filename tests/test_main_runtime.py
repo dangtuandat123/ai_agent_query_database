@@ -27,6 +27,8 @@ def _settings() -> Settings:
         schema_retriever_search_type="mmr",
         schema_retriever_fetch_k=20,
         log_level="INFO",
+        db_connect_timeout_seconds=10,
+        memory_max_threads=200,
     )
 
 
@@ -56,9 +58,10 @@ def test_main_workflow_render_failure_still_runs(monkeypatch, capsys) -> None:
     monkeypatch.setattr("main.load_settings", _settings)
     monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
 
-    run_main()
+    exit_code = run_main()
     out = capsys.readouterr().out
 
+    assert exit_code == 0
     assert "Workflow render/save skipped due to error" in out
     assert "Question: abc" in out
     assert "Route: sql" in out
@@ -98,8 +101,66 @@ def test_main_passes_thread_id_when_supported(monkeypatch, capsys) -> None:
     monkeypatch.setattr("main.load_settings", _settings)
     monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
 
-    run_main()
+    exit_code = run_main()
     out = capsys.readouterr().out
 
+    assert exit_code == 0
     assert captured["thread_id"] == "team-finance"
     assert "Thread ID: team-finance" in out
+
+
+def test_main_signature_inspection_failure_fallback(monkeypatch, capsys) -> None:
+    class FakeAgent:
+        def __init__(self, settings: Settings) -> None:
+            _ = settings
+
+        def get_workflow_mermaid(self) -> str:
+            return "graph TD;"
+
+        def save_workflow_mermaid(self, file_path: str = "agent_workflow.mmd") -> str:
+            _ = file_path
+            return "agent_workflow.mmd"
+
+        def ask(self, question: str):
+            return {
+                "route": "sql",
+                "sql_query": "SELECT 1",
+                "final_answer": f"ok: {question}",
+                "sql_rows": [],
+                "sql_error": "",
+            }
+
+    monkeypatch.setattr(
+        "main.parse_args",
+        lambda: argparse.Namespace(question="abc", thread_id="demo"),
+    )
+    monkeypatch.setattr("main.load_dotenv", lambda: None)
+    monkeypatch.setattr("main.load_settings", _settings)
+    monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
+    monkeypatch.setattr(
+        "main.inspect.signature",
+        lambda _: (_ for _ in ()).throw(ValueError("no signature")),
+    )
+
+    exit_code = run_main()
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Question: abc" in out
+    assert "Thread ID: default" in out
+
+
+def test_main_returns_error_code_on_settings_failure(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "main.parse_args",
+        lambda: argparse.Namespace(question="abc", thread_id="default"),
+    )
+    monkeypatch.setattr("main.load_dotenv", lambda: None)
+    monkeypatch.setattr(
+        "main.load_settings",
+        lambda: (_ for _ in ()).throw(ValueError("Missing OPENROUTER_API_KEY")),
+    )
+
+    exit_code = run_main()
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Configuration error:" in out

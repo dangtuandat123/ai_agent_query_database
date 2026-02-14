@@ -117,7 +117,7 @@ class TaxiDashboardAgent:
         )
         self.metadata_service = MetadataContextService(max_chars=3000)
         self._conversation_memory: Dict[str, Dict[str, str]] = {}
-        self._max_memory_threads = 200
+        self._max_memory_threads = settings.memory_max_threads
 
         self.graph = self._build_graph()
 

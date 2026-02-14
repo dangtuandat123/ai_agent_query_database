@@ -120,6 +120,7 @@ def _settings() -> Settings:
         schema_retriever_search_type="mmr",
         schema_retriever_fetch_k=20,
         log_level="INFO",
+        memory_max_threads=200,
     )
 
 
@@ -395,13 +396,11 @@ def test_graph_thread_memory_eviction_by_capacity() -> None:
     fake_retriever = FakeRetriever(selected_tables=[tables[0]])
 
     agent = TaxiDashboardAgent(
-        _settings(),
+        replace(_settings(), memory_max_threads=1),
         db_client=fake_db,  # type: ignore[arg-type]
         llm=fake_llm,  # type: ignore[arg-type]
         schema_retriever=fake_retriever,  # type: ignore[arg-type]
     )
-    agent._max_memory_threads = 1
-
     _ = agent.ask("thread A q1", thread_id="thread-a")
     _ = agent.ask("thread B q1", thread_id="thread-b")
     next_a = agent.ask("thread A q2", thread_id="thread-a")
