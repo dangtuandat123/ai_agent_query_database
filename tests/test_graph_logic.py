@@ -491,6 +491,7 @@ def test_graph_error_answer_keeps_last_failed_sql_on_repair_failure() -> None:
 
     assert result["attempts"] == 1
     assert result["sql_error_type"] == "repair"
+    assert "QUALIFY" in result["last_failed_sql"]
     assert "QUALIFY" in result["final_answer"]
 
 

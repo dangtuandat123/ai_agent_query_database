@@ -235,3 +235,42 @@ def test_main_prints_sql_error_type_when_present(monkeypatch, capsys) -> None:
     assert exit_code == 0
     assert "Attempts: 1" in out
     assert "SQL error type: repair" in out
+
+
+def test_main_prints_last_failed_sql_when_sql_query_empty(monkeypatch, capsys) -> None:
+    class FakeAgent:
+        def __init__(self, settings: Settings) -> None:
+            _ = settings
+
+        def get_workflow_mermaid(self) -> str:
+            return "graph TD;"
+
+        def save_workflow_mermaid(self, file_path: str = "agent_workflow.mmd") -> str:
+            _ = file_path
+            return "agent_workflow.mmd"
+
+        def ask(self, question: str, thread_id: str = "default"):
+            _ = (question, thread_id)
+            return {
+                "route": "sql",
+                "attempts": 1,
+                "sql_query": "",
+                "last_failed_sql": "SELECT * FROM public.taxi_trip_data QUALIFY 1=1",
+                "final_answer": "failed",
+                "sql_rows": [],
+                "sql_error_type": "repair",
+                "sql_error": "repair failed",
+            }
+
+    monkeypatch.setattr(
+        "main.parse_args",
+        lambda: argparse.Namespace(question="abc", thread_id="demo"),
+    )
+    monkeypatch.setattr("main.load_dotenv", lambda: None)
+    monkeypatch.setattr("main.load_settings", _settings)
+    monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
+
+    exit_code = run_main()
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "SQL: SELECT * FROM public.taxi_trip_data QUALIFY 1=1" in out

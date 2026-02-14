@@ -43,7 +43,8 @@ def main() -> int:
         result = agent.ask(question)
         print(f"Route: {result.get('route', 'n/a')}")
         print(f"Attempts: {result.get('attempts', 0)}")
-        print(f"SQL: {result.get('sql_query', 'n/a')}")
+        display_sql = result.get("sql_query") or result.get("last_failed_sql") or "n/a"
+        print(f"SQL: {display_sql}")
         answer = result.get("final_answer", "")
         print(f"Answer: {answer[:500]}")
         if result.get("sql_error"):

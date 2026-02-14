@@ -113,7 +113,8 @@ def main() -> int:
     if result.get("intent"):
         print(f"Intent: {result.get('intent', 'n/a')}")
     print(f"Attempts: {result.get('attempts', 0)}")
-    print(f"SQL: {result.get('sql_query', 'n/a')}")
+    display_sql = result.get("sql_query") or result.get("last_failed_sql") or "n/a"
+    print(f"SQL: {display_sql}")
     print("\nAnswer:")
     print(result.get("final_answer", "No answer"))
 
