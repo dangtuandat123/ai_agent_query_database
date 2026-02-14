@@ -55,6 +55,20 @@ def test_allow_complex_cte_without_keyword_false_positive() -> None:
     assert err is None
 
 
+def test_allow_join_lateral_without_false_positive() -> None:
+    sql = (
+        "SELECT t.vendor_id "
+        "FROM public.taxi_trip_data t "
+        "JOIN LATERAL (SELECT 1) x ON TRUE "
+        "LIMIT 1"
+    )
+    err = validate_readonly_sql(
+        sql,
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+    )
+    assert err is None
+
+
 def test_deny_multi_statement() -> None:
     err = validate_readonly_sql("SELECT 1; SELECT 2")
     assert err == "Only one SQL statement is allowed."

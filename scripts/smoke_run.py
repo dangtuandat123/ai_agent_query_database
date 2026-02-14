@@ -42,6 +42,7 @@ def main() -> int:
         print(f"Q: {question}")
         result = agent.ask(question)
         print(f"Route: {result.get('route', 'n/a')}")
+        print(f"Attempts: {result.get('attempts', 0)}")
         print(f"SQL: {result.get('sql_query', 'n/a')}")
         answer = result.get("final_answer", "")
         print(f"Answer: {answer[:500]}")

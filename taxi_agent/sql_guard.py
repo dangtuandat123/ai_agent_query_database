@@ -58,6 +58,10 @@ RESERVED_WORDS = {
     "all",
     "partition",
     "over",
+    "lateral",
+    "only",
+    "using",
+    "natural",
 }
 
 

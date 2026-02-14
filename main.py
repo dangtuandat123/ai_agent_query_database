@@ -110,6 +110,7 @@ def main() -> int:
     print(f"Route: {result.get('route', 'n/a')}")
     if result.get("intent"):
         print(f"Intent: {result.get('intent', 'n/a')}")
+    print(f"Attempts: {result.get('attempts', 0)}")
     print(f"SQL: {result.get('sql_query', 'n/a')}")
     print("\nAnswer:")
     print(result.get("final_answer", "No answer"))
@@ -122,6 +123,8 @@ def main() -> int:
 
     sql_error = result.get("sql_error")
     if sql_error:
+        if result.get("sql_error_type"):
+            print(f"SQL error type: {result.get('sql_error_type')}")
         print(f"\nSQL error: {sql_error}")
     return 0
 
