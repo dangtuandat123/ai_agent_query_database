@@ -63,6 +63,17 @@ RESERVED_WORDS = {
     "using",
     "natural",
 }
+TABLE_SOURCE_PREFIX_WORDS = {
+    "lateral",
+    "only",
+    "natural",
+    "inner",
+    "left",
+    "right",
+    "full",
+    "cross",
+    "outer",
+}
 
 
 def sanitize_sql(sql: str) -> str:
@@ -129,7 +140,11 @@ def _extract_referenced_tables(sql: str) -> set[str]:
             isinstance(tok, Parenthesis) and "select" in tok.value.lower()
             for tok in identifier.tokens
         )
-        if has_subquery:
+        has_function_call = any(
+            isinstance(tok, Function)
+            for tok in identifier.tokens
+        )
+        if has_subquery or has_function_call:
             return result
         name = identifier.get_real_name() or identifier.get_name()
         parent = identifier.get_parent_name()
@@ -160,6 +175,22 @@ def _extract_referenced_tables(sql: str) -> set[str]:
         return result
 
     def walk_tokenlist(token_list: TokenList) -> set[str]:
+        def get_table_target_token(start_index: int) -> Any:
+            j = start_index
+            while j < len(tokens):
+                candidate = tokens[j]
+                raw = str(getattr(candidate, "value", "")).strip()
+                normalized = raw.lower()
+
+                if not raw:
+                    j += 1
+                    continue
+                if normalized in TABLE_SOURCE_PREFIX_WORDS:
+                    j += 1
+                    continue
+                return candidate
+            return None
+
         refs = set()
         tokens = [t for t in token_list.tokens if not t.is_whitespace]
         i = 0
@@ -168,7 +199,7 @@ def _extract_referenced_tables(sql: str) -> set[str]:
             value_upper = str(getattr(token, "value", "")).upper()
 
             if value_upper == "FROM" or "JOIN" in value_upper:
-                next_token = tokens[i + 1] if i + 1 < len(tokens) else None
+                next_token = get_table_target_token(i + 1)
                 refs.update(extract_table_targets(next_token))
 
             # Recursively scan nested subqueries but skip SQL function arguments

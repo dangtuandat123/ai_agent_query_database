@@ -67,14 +67,16 @@ def test_run_query_sets_read_only_and_timeout(monkeypatch: Any) -> None:
 
 def test_get_table_info_uses_langchain_sqldatabase_cache(monkeypatch: Any) -> None:
     created = {"count": 0}
+    captured_kwargs: dict[str, Any] = {}
 
     class FakeSQLDatabase:
         def get_table_info(self, table_names: list[str]) -> str:
             return f"tables={','.join(table_names)}"
 
     def fake_from_uri(*args: Any, **kwargs: Any) -> FakeSQLDatabase:
-        _ = (args, kwargs)
+        _ = args
         created["count"] += 1
+        captured_kwargs.update(kwargs)
         return FakeSQLDatabase()
 
     monkeypatch.setattr("taxi_agent.db.SQLDatabase.from_uri", fake_from_uri)
@@ -88,3 +90,6 @@ def test_get_table_info_uses_langchain_sqldatabase_cache(monkeypatch: Any) -> No
     assert out1 == "tables=taxi_trip_data"
     assert out2 == "tables=taxi_trip_data"
     assert created["count"] == 1
+    assert captured_kwargs["schema"] == "public"
+    assert captured_kwargs["sample_rows_in_table_info"] == 0
+    assert captured_kwargs["engine_args"]["connect_args"]["connect_timeout"] == 10

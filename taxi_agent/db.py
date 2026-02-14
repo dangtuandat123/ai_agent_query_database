@@ -34,6 +34,11 @@ class PostgresClient:
 
         sql_db = SQLDatabase.from_uri(
             self.dsn,
+            engine_args={
+                "connect_args": {
+                    "connect_timeout": self.connect_timeout_seconds,
+                }
+            },
             schema=table_schema,
             sample_rows_in_table_info=0,
         )
