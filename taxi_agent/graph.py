@@ -452,7 +452,7 @@ class TaxiDashboardAgent:
 
     def _error_answer(self, state: DashboardState) -> DashboardState:
         question = state["question"]
-        sql_query = state.get("sql_query", "")
+        sql_query = state.get("sql_query") or state.get("last_failed_sql", "")
         sql_error = state.get("sql_error", "Unknown error")
         return {
             "final_answer": error_after_retry_message(question, sql_query, sql_error),

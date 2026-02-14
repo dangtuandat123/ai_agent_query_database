@@ -47,6 +47,7 @@ def test_main_workflow_render_failure_still_runs(monkeypatch, capsys) -> None:
         def ask(self, question: str):
             return {
                 "route": "sql",
+                "attempts": 0,
                 "sql_query": "SELECT 1",
                 "final_answer": f"ok: {question}",
                 "sql_rows": [{"x": 1}],
@@ -65,6 +66,7 @@ def test_main_workflow_render_failure_still_runs(monkeypatch, capsys) -> None:
     assert "Workflow render/save skipped due to error" in out
     assert "Question: abc" in out
     assert "Route: sql" in out
+    assert "Attempts: 0" in out
     assert "ok: abc" in out
 
 
@@ -194,3 +196,42 @@ def test_main_returns_error_code_on_runtime_failure(monkeypatch, capsys) -> None
     out = capsys.readouterr().out
     assert exit_code == 1
     assert "Runtime error: boom" in out
+
+
+def test_main_prints_sql_error_type_when_present(monkeypatch, capsys) -> None:
+    class FakeAgent:
+        def __init__(self, settings: Settings) -> None:
+            _ = settings
+
+        def get_workflow_mermaid(self) -> str:
+            return "graph TD;"
+
+        def save_workflow_mermaid(self, file_path: str = "agent_workflow.mmd") -> str:
+            _ = file_path
+            return "agent_workflow.mmd"
+
+        def ask(self, question: str, thread_id: str = "default"):
+            _ = (question, thread_id)
+            return {
+                "route": "sql",
+                "attempts": 1,
+                "sql_query": "SELECT 1",
+                "final_answer": "failed",
+                "sql_rows": [],
+                "sql_error_type": "repair",
+                "sql_error": "repair failed",
+            }
+
+    monkeypatch.setattr(
+        "main.parse_args",
+        lambda: argparse.Namespace(question="abc", thread_id="demo"),
+    )
+    monkeypatch.setattr("main.load_dotenv", lambda: None)
+    monkeypatch.setattr("main.load_settings", _settings)
+    monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
+
+    exit_code = run_main()
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Attempts: 1" in out
+    assert "SQL error type: repair" in out

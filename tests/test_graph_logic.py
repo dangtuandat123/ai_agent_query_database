@@ -459,6 +459,41 @@ def test_graph_repair_path_rechecks_security_guard() -> None:
     assert fake_db.queries == []
 
 
+def test_graph_error_answer_keeps_last_failed_sql_on_repair_failure() -> None:
+    tables = _tables()
+
+    class FailingDB(FakeDB):
+        def run_query(self, sql: str) -> List[dict[str, Any]]:
+            self.queries.append(sql)
+            if "qualify" in sql.lower():
+                raise RuntimeError('syntax error at or near "QUALIFY"')
+            return self.rows
+
+    fake_db = FailingDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a QUALIFY 1=1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="should not reach answer",
+        sql_fail_on_calls={2},  # repair call fails
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    s = replace(_settings(), max_sql_retries=1)
+    agent = TaxiDashboardAgent(
+        s,
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Force QUALIFY then fail repair")
+
+    assert result["attempts"] == 1
+    assert result["sql_error_type"] == "repair"
+    assert "QUALIFY" in result["final_answer"]
+
+
 def test_graph_embedding_init_failure_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     tables = _tables()
     fake_db = FakeDB(tables=tables, rows=[{"id": 1}])

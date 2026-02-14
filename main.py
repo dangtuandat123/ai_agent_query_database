@@ -51,6 +51,8 @@ def configure_logging(level: str) -> None:
     # Keep third-party transport noise out of normal runs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 
 
 def main() -> int:

@@ -19,6 +19,7 @@ class DashboardState(TypedDict, total=False):
     previous_sql_query: str
     previous_final_answer: str
     sql_query: str
+    last_failed_sql: str
     sql_reasoning: str
     sql_rows: List[Dict[str, Any]]
     sql_error: str

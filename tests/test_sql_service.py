@@ -35,6 +35,7 @@ def test_classify_sql_error() -> None:
     assert classify_sql_error("outside allowed schema context") == "allowlist"
     assert classify_sql_error("Only SELECT queries are allowed.") == "guard"
     assert classify_sql_error("statement timeout") == "timeout"
+    assert classify_sql_error("Error code: 401 - User not found.") == "provider"
     assert classify_sql_error("relation does not exist") == "db"
     assert classify_sql_error('relation "only_table" does not exist') == "db"
 
@@ -135,6 +136,7 @@ def test_repair_sql_empty_output_is_repair_error() -> None:
     assert result["sql_error_type"] == "repair"
     assert "empty sql" in result["sql_error"].lower()
     assert result["sql_query"] == ""
+    assert result["last_failed_sql"] == "SELECT 1"
 
 
 def test_repair_sql_requires_schema_context() -> None:
@@ -153,6 +155,26 @@ def test_repair_sql_requires_schema_context() -> None:
     )
     assert result["sql_error_type"] == "schema_context"
     assert result["sql_query"] == ""
+    assert result["last_failed_sql"] == "SELECT 1"
+
+
+def test_repair_sql_provider_error_classification() -> None:
+    service = SQLService(
+        sql_llm=FakeSQLLLM(should_fail=True),
+        db=FakeDB(),  # type: ignore[arg-type]
+        logger=logging.getLogger("test.sql"),
+    )
+    result = service.repair_sql(
+        question="q",
+        failed_sql="SELECT 1",
+        sql_error="err",
+        schema_context="Table: public.taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+        attempts=1,
+    )
+    # FakeSQLLLM throws generic RuntimeError so still repair.
+    assert result["sql_error_type"] == "repair"
+    assert result["last_failed_sql"] == "SELECT 1"
 
 
 def test_generate_sql_prompt_uses_configured_row_limit() -> None:

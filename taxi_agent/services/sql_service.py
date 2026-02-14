@@ -25,6 +25,15 @@ def classify_sql_error(sql_error: str) -> str:
         return "guard"
     if "timeout" in lowered or "statement timeout" in lowered:
         return "timeout"
+    if (
+        "401" in lowered
+        or "403" in lowered
+        or "unauthorized" in lowered
+        or "forbidden" in lowered
+        or "invalid api key" in lowered
+        or "user not found" in lowered
+    ):
+        return "provider"
     return "db"
 
 
@@ -198,6 +207,7 @@ class SQLService:
             msg = "Schema context is empty, cannot repair SQL."
             return {
                 "sql_query": "",
+                "last_failed_sql": failed_sql,
                 "sql_reasoning": "",
                 "attempts": attempts,
                 "sql_error": msg,
@@ -240,6 +250,7 @@ class SQLService:
                 self.logger.error(msg)
                 return {
                     "sql_query": "",
+                    "last_failed_sql": failed_sql,
                     "sql_reasoning": "",
                     "attempts": attempts,
                     "sql_error": msg,
@@ -257,11 +268,13 @@ class SQLService:
         except Exception as exc:
             msg = f"SQL repair failed: {exc}"
             self.logger.error(msg)
+            err_type = classify_sql_error(str(exc))
             return {
                 "sql_query": "",
+                "last_failed_sql": failed_sql,
                 "sql_reasoning": "",
                 "attempts": attempts,
                 "sql_error": msg,
-                "sql_error_type": "repair",
+                "sql_error_type": err_type if err_type == "provider" else "repair",
                 "sql_error_message": str(exc),
             }
