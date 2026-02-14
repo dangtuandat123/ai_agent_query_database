@@ -325,14 +325,17 @@ class TaxiDashboardAgent:
     @staticmethod
     def _heuristic_route_question(question: str) -> str:
         normalized = normalize_for_matching(question)
-        unsupported_hints = (
+        token_hints = {
             "weather",
             "temperature",
             "bitcoin",
-            "stock price",
+            "stock",
             "football",
             "soccer",
             "news",
+        }
+        phrase_hints = (
+            "stock price",
             "write file",
             "web browse",
             "delete table",
@@ -341,7 +344,10 @@ class TaxiDashboardAgent:
             "update set",
             "create database",
         )
-        if any(hint in normalized for hint in unsupported_hints):
+        question_tokens = TaxiDashboardAgent._tokenize_heuristic_text(normalized)
+        if question_tokens.intersection(token_hints):
+            return "unsupported"
+        if any(hint in normalized for hint in phrase_hints):
             return "unsupported"
         return "sql"
 

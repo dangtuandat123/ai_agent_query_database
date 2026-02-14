@@ -57,7 +57,8 @@ def main() -> int:
         answer = result.get("final_answer", "")
         print(f"Answer: {answer[:500]}")
         if result.get("sql_error"):
-            print(f"SQL error: {result['sql_error']}")
+            safe_error = redact_sensitive_text(str(result["sql_error"]))
+            print(f"SQL error: {safe_error}")
 
     return 0
 

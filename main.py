@@ -137,9 +137,10 @@ def main() -> int:
 
     sql_error = result.get("sql_error")
     if sql_error:
+        safe_sql_error = redact_sensitive_text(str(sql_error))
         if result.get("sql_error_type"):
             print(f"SQL error type: {result.get('sql_error_type')}")
-        print(f"\nSQL error: {sql_error}")
+        print(f"\nSQL error: {safe_sql_error}")
     return 0
 
 
