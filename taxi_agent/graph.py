@@ -491,7 +491,7 @@ class TaxiDashboardAgent:
                 "failed": "error_answer",
             },
         )
-        builder.add_edge("repair_sql", "execute_sql")
+        builder.add_edge("repair_sql", "security_check")
         builder.add_edge("answer_user", END)
         builder.add_edge("unsupported_answer", END)
         builder.add_edge("error_answer", END)

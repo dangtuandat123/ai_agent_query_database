@@ -5,7 +5,7 @@ from typing import List
 TOKEN_PATTERN = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
 QUARTER_PATTERN = re.compile(r"\bq[1-4]\s*20\d{2}\b", re.IGNORECASE)
-YEAR_MONTH_PATTERN = re.compile(r"\b(19|20)\d{2}[/-](0?[1-9]|1[0-2])\b")
+YEAR_MONTH_PATTERN = re.compile(r"\b(?:19|20)\d{2}[/-](?:0?[1-9]|1[0-2])\b")
 QUOTED_VALUE_PATTERN = re.compile(r"[\"']([^\"']{1,80})[\"']")
 
 
@@ -55,9 +55,9 @@ class MetadataContextService:
 
         detected_values = sorted(
             {
-                *DATE_PATTERN.findall(question),
-                *QUARTER_PATTERN.findall(question),
-                *YEAR_MONTH_PATTERN.findall(question),
+                *[match.group(0) for match in DATE_PATTERN.finditer(question)],
+                *[match.group(0) for match in QUARTER_PATTERN.finditer(question)],
+                *[match.group(0) for match in YEAR_MONTH_PATTERN.finditer(question)],
                 *[item.strip() for item in QUOTED_VALUE_PATTERN.findall(question)],
             }
         )
@@ -80,4 +80,3 @@ class MetadataContextService:
 
         lines.append("- policy: read-only analytics, single statement, allowed-table only")
         return _truncate("\n".join(lines), self.max_chars)
-

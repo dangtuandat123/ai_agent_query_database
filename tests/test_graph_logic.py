@@ -303,6 +303,33 @@ def test_graph_followup_intent_uses_previous_turn_context() -> None:
     assert "table_b" in second["sql_query"].lower()
 
 
+def test_graph_repair_path_rechecks_security_guard() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_query",
+        sql_first="DELETE FROM public.table_a",
+        sql_second="DELETE FROM public.table_a",
+        answer_text="should not execute",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    s = replace(_settings(), max_sql_retries=1)
+    agent = TaxiDashboardAgent(
+        s,
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("use table_b")
+
+    assert result["route"] == "sql"
+    assert result["sql_error_type"] == "guard"
+    assert "only select queries are allowed" in result["sql_error"].lower()
+    assert fake_db.queries == []
+
+
 def test_graph_embedding_init_failure_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     tables = _tables()
     fake_db = FakeDB(tables=tables, rows=[{"id": 1}])

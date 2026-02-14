@@ -31,3 +31,13 @@ def test_metadata_context_truncates() -> None:
         schema_context="Table: public.taxi_trip_data",
     )
     assert len(context) <= 50
+
+
+def test_metadata_context_handles_year_month_without_crash() -> None:
+    service = MetadataContextService(max_chars=2000)
+    context = service.build(
+        question="For 2018/03 compare payment_type in taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+        schema_context="Table: public.taxi_trip_data\nColumns:\n- payment_type (integer)\n",
+    )
+    assert "2018/03" in context
