@@ -25,6 +25,40 @@ SQL_FENCE_PATTERN = re.compile(
 )
 SQL_PREFIX_PATTERN = re.compile(r"^(?:sqlquery|sql)\s*:\s*", re.IGNORECASE)
 SQL_START_PATTERN = re.compile(r"\b(select|with)\b", re.IGNORECASE)
+RESERVED_WORDS = {
+    "select",
+    "with",
+    "from",
+    "join",
+    "inner",
+    "left",
+    "right",
+    "full",
+    "outer",
+    "cross",
+    "where",
+    "group",
+    "order",
+    "by",
+    "having",
+    "limit",
+    "offset",
+    "on",
+    "as",
+    "and",
+    "or",
+    "not",
+    "case",
+    "when",
+    "then",
+    "else",
+    "end",
+    "distinct",
+    "union",
+    "all",
+    "partition",
+    "over",
+}
 
 
 def sanitize_sql(sql: str) -> str:
@@ -117,7 +151,7 @@ def _extract_referenced_tables(sql: str) -> set[str]:
             value = str(getattr(token, "value", "")).strip()
             if value and value not in {"(", ")"}:
                 clean = normalize_identifier(value.split()[0])
-                if clean:
+                if clean and clean not in RESERVED_WORDS:
                     result.add(clean)
         return result
 
@@ -146,6 +180,8 @@ def _extract_referenced_tables(sql: str) -> set[str]:
 
     expanded = set()
     for ref in refs:
+        if ref in RESERVED_WORDS:
+            continue
         expanded.add(ref)
         if "." in ref:
             expanded.add(ref.split(".")[-1])

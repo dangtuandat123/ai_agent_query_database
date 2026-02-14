@@ -30,6 +30,31 @@ def test_allow_with_recursive_cte() -> None:
     assert err is None
 
 
+def test_allow_complex_cte_without_keyword_false_positive() -> None:
+    sql = (
+        "WITH base_trips AS ("
+        "  SELECT pickup_location_id, dropoff_location_id, payment_type, total_amount "
+        "  FROM public.taxi_trip_data "
+        "  WHERE pickup_datetime >= '2018-04-01' AND pickup_datetime < '2018-07-01'"
+        "), final_metrics AS ("
+        "  SELECT pickup_location_id, dropoff_location_id, payment_type, "
+        "         SUM(total_amount) AS total_revenue_q2 "
+        "  FROM base_trips "
+        "  GROUP BY 1,2,3"
+        ") "
+        "SELECT *, "
+        "  DENSE_RANK() OVER (PARTITION BY payment_type ORDER BY total_revenue_q2 DESC) AS payment_rank "
+        "FROM final_metrics "
+        "ORDER BY total_revenue_q2 DESC "
+        "LIMIT 20"
+    )
+    err = validate_readonly_sql(
+        sql,
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+    )
+    assert err is None
+
+
 def test_deny_multi_statement() -> None:
     err = validate_readonly_sql("SELECT 1; SELECT 2")
     assert err == "Only one SQL statement is allowed."

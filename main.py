@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import inspect
 import logging
 import sys
@@ -10,12 +10,11 @@ from taxi_agent.graph import TaxiDashboardAgent
 
 
 DEFAULT_TEST_QUESTION = (
-    "Trong quý 2/2018, với từng cặp (PULocationID, DOLocationID) và payment_type, "
-    "hãy tính số chuyến, tổng doanh thu total_amount, median trip_distance, thời lượng "
-    "trung bình chuyến (phút, từ pickup đến dropoff), tỷ lệ chuyến có tip_amount > 0, "
-    "và doanh thu trên mỗi dặm. Chỉ giữ các nhóm có ít nhất 5.000 chuyến, loại bỏ các "
-    "chuyến có trip_distance <= 0 hoặc total_amount <= 0, sau đó trả về top 10 nhóm theo "
-    "doanh thu giảm dần và thêm cột xếp hạng dense_rank."
+    "Bài test tự sửa SQL cực khó: Trong tháng 3/2018, hãy dùng QUALIFY để lấy top 10 cặp điểm đón/điểm trả theo từng "
+    "hình thức thanh toán dựa trên tổng doanh thu (nếu schema thực tế dùng tên cột khác như PULocationID/DOLocationID thì tự ánh xạ). "
+    "Đồng thời trả thêm: tổng số chuyến, tổng doanh thu, trung vị quãng đường, P90 thời lượng chuyến, tỷ lệ chuyến có tip > 0, "
+    "doanh thu trên mỗi dặm, và xếp hạng trong từng hình thức thanh toán. "
+    "Loại các chuyến bất thường (quãng đường <= 0, tổng tiền <= 0, thời lượng <= 0 hoặc > 180 phút)."
 )
 
 
@@ -129,3 +128,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
