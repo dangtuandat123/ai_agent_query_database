@@ -47,6 +47,8 @@ class SQLService:
         question: str,
         schema_context: str,
         allowed_tables: List[str],
+        metadata_context: str = "",
+        conversation_context: str = "",
     ) -> Dict[str, Any]:
         if not schema_context or not allowed_tables:
             msg = "Schema context is empty, cannot generate SQL."
@@ -66,6 +68,13 @@ class SQLService:
                         content=SQL_GENERATOR_SYSTEM_PROMPT.format(
                             schema_text=schema_context,
                             allowed_tables=allowed_tables_text,
+                            metadata_context=(
+                                metadata_context.strip() or "No metadata hints."
+                            ),
+                            conversation_context=(
+                                conversation_context.strip()
+                                or "No prior conversation context."
+                            ),
                             row_limit=self.row_limit,
                         )
                     ),
@@ -102,7 +111,12 @@ class SQLService:
                 "sql_error_message": str(exc),
             }
 
-    def execute_sql(self, *, sql_query: str, allowed_tables: List[str]) -> Dict[str, Any]:
+    def preflight_sql(
+        self,
+        *,
+        sql_query: str,
+        allowed_tables: List[str],
+    ) -> Dict[str, Any]:
         if not allowed_tables:
             msg = "Allowed table context is empty; refusing to execute SQL."
             self.logger.warning(msg)
@@ -126,6 +140,27 @@ class SQLService:
                 "sql_error_type": err_type,
                 "sql_error_message": guard_error,
             }
+        return {
+            "sql_rows": [],
+            "sql_error": "",
+            "sql_error_type": "",
+            "sql_error_message": "",
+        }
+
+    def execute_sql(
+        self,
+        *,
+        sql_query: str,
+        allowed_tables: List[str],
+        skip_guard: bool = False,
+    ) -> Dict[str, Any]:
+        if not skip_guard:
+            preflight = self.preflight_sql(
+                sql_query=sql_query,
+                allowed_tables=allowed_tables,
+            )
+            if preflight.get("sql_error"):
+                return preflight
 
         try:
             rows = self.db.run_query(sql_query)
@@ -156,6 +191,8 @@ class SQLService:
         schema_context: str,
         allowed_tables: List[str],
         attempts: int,
+        metadata_context: str = "",
+        conversation_context: str = "",
     ) -> Dict[str, Any]:
         if not schema_context or not allowed_tables:
             msg = "Schema context is empty, cannot repair SQL."
@@ -177,6 +214,13 @@ class SQLService:
                         content=SQL_REPAIR_SYSTEM_PROMPT.format(
                             schema_text=schema_context,
                             allowed_tables=allowed_tables_text,
+                            metadata_context=(
+                                metadata_context.strip() or "No metadata hints."
+                            ),
+                            conversation_context=(
+                                conversation_context.strip()
+                                or "No prior conversation context."
+                            ),
                             row_limit=self.row_limit,
                         )
                     ),

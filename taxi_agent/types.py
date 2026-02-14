@@ -5,12 +5,18 @@ class DashboardState(TypedDict, total=False):
     question: str
     route: str
     route_reason: str
+    intent: str
+    intent_reason: str
     schema_overview: str
     schema_context: str
     schema_context_full: str
+    metadata_context: str
     schema_error: str
     allowed_tables: List[str]
     all_allowed_tables: List[str]
+    previous_question: str
+    previous_sql_query: str
+    previous_final_answer: str
     sql_query: str
     sql_reasoning: str
     sql_rows: List[Dict[str, Any]]

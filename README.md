@@ -22,6 +22,7 @@ Simple MVP using:
 - `taxi_agent/sql_guard.py`: read-only SQL validation
 - `taxi_agent/retrieval.py`: LangChain hybrid schema retriever (vector + BM25, prefers EnsembleRetriever when available)
 - `taxi_agent/services/schema_service.py`: schema context builder + cache TTL
+- `taxi_agent/services/metadata_service.py`: metadata hint builder (table/column/value hints)
 - `taxi_agent/services/sql_service.py`: SQL generate/repair/execute orchestration
 - `taxi_agent/services/language_service.py`: VN/EN fallback messages
 - `taxi_agent/db.py`: PostgreSQL client + LangChain `SQLDatabase` schema context adapter (+ backward-compatible SQL guard exports)
@@ -104,6 +105,7 @@ python smoke_run.py
 - DB connect timeout is configurable via `DB_CONNECT_TIMEOUT_SECONDS` (default: 10s).
 - SQL repair auto-expands from retrieved schema to full schema when needed.
 - DB execution pins `search_path` to `DB_SCHEMA` for safer schema isolation.
+- Graph now includes an intent step (`sql_query` / `sql_followup`) and a security preflight before query execution.
 - Data loader supports safe modes with `IMPORT_MODE`: `fail_if_exists`, `truncate`, `append`.
 - Optional CSV path override for loader/preview via `TAXI_CSV_PATH`
   (relative paths are resolved from project root).

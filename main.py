@@ -75,6 +75,8 @@ def main() -> None:
     print("=== Taxi Agent Database Dashboard ===")
     print(f"Question: {question}")
     print(f"Route: {result.get('route', 'n/a')}")
+    if result.get("intent"):
+        print(f"Intent: {result.get('intent', 'n/a')}")
     print(f"SQL: {result.get('sql_query', 'n/a')}")
     print("\nAnswer:")
     print(result.get("final_answer", "No answer"))

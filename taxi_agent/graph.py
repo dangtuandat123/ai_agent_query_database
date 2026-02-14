@@ -10,7 +10,11 @@ from pydantic import BaseModel, Field
 
 from .config import Settings
 from .db import PostgresClient
-from .prompts import ANSWER_SYSTEM_PROMPT, ROUTER_SYSTEM_PROMPT
+from .prompts import (
+    ANSWER_SYSTEM_PROMPT,
+    INTENT_SYSTEM_PROMPT,
+    ROUTER_SYSTEM_PROMPT,
+)
 from .retrieval import SchemaRetriever, SchemaRetrieverConfig
 from .services.language_service import (
     empty_question_message,
@@ -20,6 +24,7 @@ from .services.language_service import (
     internal_error_message,
     unsupported_message,
 )
+from .services.metadata_service import MetadataContextService
 from .services.schema_service import SchemaService
 from .services.sql_service import SQLService
 from .types import AgentResult, DashboardState
@@ -35,6 +40,14 @@ class RouteDecision(BaseModel):
 class SQLDraft(BaseModel):
     sql: str = Field(..., description="A single valid PostgreSQL SELECT query")
     reasoning: str = Field("", description="Short explanation")
+
+
+class IntentDecision(BaseModel):
+    intent: Literal["sql_query", "sql_followup", "unsupported"] = Field(
+        ...,
+        description="Task intent classification.",
+    )
+    reason: str = Field(..., description="Short reason for selected intent")
 
 
 def _stringify_content(content: Any) -> str:
@@ -82,6 +95,7 @@ class TaxiDashboardAgent:
         )
 
         self.router_llm = self.llm.with_structured_output(RouteDecision)
+        self.intent_llm = self.llm.with_structured_output(IntentDecision)
         self.sql_llm = self.llm.with_structured_output(SQLDraft)
 
         self.schema_service = SchemaService(
@@ -101,6 +115,8 @@ class TaxiDashboardAgent:
             logger=self.sql_logger,
             row_limit=settings.query_row_limit,
         )
+        self.metadata_service = MetadataContextService(max_chars=3000)
+        self._last_success_turn: Dict[str, str] = {}
 
         self.graph = self._build_graph()
 
@@ -188,11 +204,93 @@ class TaxiDashboardAgent:
                 "attempts": state.get("attempts", 0),
             }
 
+    def _build_metadata_context(self, state: DashboardState) -> DashboardState:
+        context = self.metadata_service.build(
+            question=state["question"],
+            allowed_tables=state.get("allowed_tables", []),
+            schema_context=state.get("schema_context", ""),
+        )
+        return {"metadata_context": context}
+
+    def _build_previous_context_text(self, state: DashboardState) -> str:
+        previous_question = state.get("previous_question", "").strip()
+        previous_sql_query = state.get("previous_sql_query", "").strip()
+        previous_final_answer = state.get("previous_final_answer", "").strip()
+        if not previous_question and not previous_sql_query and not previous_final_answer:
+            return "No previous conversation context."
+        return (
+            f"Previous question: {previous_question or 'n/a'}\n"
+            f"Previous SQL: {previous_sql_query or 'n/a'}\n"
+            f"Previous answer summary: {previous_final_answer[:500] or 'n/a'}"
+        )
+
+    def _determine_intent(self, state: DashboardState) -> DashboardState:
+        if state.get("route") != "sql":
+            return {
+                "intent": "unsupported",
+                "intent_reason": state.get("route_reason", "Unsupported route."),
+            }
+
+        question = state["question"]
+        previous_context = self._build_previous_context_text(state)
+        try:
+            decision = self.intent_llm.invoke(
+                [
+                    SystemMessage(
+                        content=INTENT_SYSTEM_PROMPT.format(
+                            question=question,
+                            previous_context=previous_context,
+                        )
+                    ),
+                    HumanMessage(content=question),
+                ]
+            )
+            self.logger.info("Intent decision=%s", decision.intent)
+            return {"intent": decision.intent, "intent_reason": decision.reason}
+        except Exception as exc:
+            self.logger.warning("Intent router failed, fallback to sql_query: %s", exc)
+            lowered = question.lower()
+            followup_hints = (
+                "còn",
+                "so sánh",
+                "compare",
+                "what about",
+                "how about",
+                "tiếp",
+                "again",
+                "same filter",
+            )
+            has_previous = bool(state.get("previous_question", "").strip())
+            is_followup = has_previous and any(hint in lowered for hint in followup_hints)
+            return {
+                "intent": "sql_followup" if is_followup else "sql_query",
+                "intent_reason": "Heuristic fallback",
+            }
+
     def _generate_sql(self, state: DashboardState) -> DashboardState:
         self.logger.info("Generating SQL.")
+        conversation_context = self._build_previous_context_text(state)
         return self.sql_service.generate_sql(
             question=state["question"],
             schema_context=state.get("schema_context", ""),
+            allowed_tables=state.get("allowed_tables", []),
+            metadata_context=state.get("metadata_context", ""),
+            conversation_context=conversation_context,
+        )
+
+    def _security_check(self, state: DashboardState) -> DashboardState:
+        existing_error = state.get("sql_error", "")
+        sql_query = state.get("sql_query", "")
+        if existing_error and not sql_query:
+            return {
+                "sql_error": existing_error,
+                "sql_error_type": state.get("sql_error_type", "generation"),
+                "sql_error_message": state.get("sql_error_message", existing_error),
+            }
+
+        self.logger.info("Security preflight for SQL.")
+        return self.sql_service.preflight_sql(
+            sql_query=sql_query,
             allowed_tables=state.get("allowed_tables", []),
         )
 
@@ -217,6 +315,7 @@ class TaxiDashboardAgent:
         return self.sql_service.execute_sql(
             sql_query=sql_query,
             allowed_tables=state.get("allowed_tables", []),
+            skip_guard=True,
         )
 
     def _repair_sql(self, state: DashboardState) -> DashboardState:
@@ -244,15 +343,19 @@ class TaxiDashboardAgent:
                 "Repair attempt=%d has no failed SQL; regenerating SQL.",
                 attempts,
             )
+            conversation_context = self._build_previous_context_text(state)
             result = self.sql_service.generate_sql(
                 question=state["question"],
                 schema_context=schema_context,
                 allowed_tables=allowed_tables,
+                metadata_context=state.get("metadata_context", ""),
+                conversation_context=conversation_context,
             )
             result["attempts"] = attempts
             result["allowed_tables"] = allowed_tables
             return result
 
+        conversation_context = self._build_previous_context_text(state)
         result = self.sql_service.repair_sql(
             question=state["question"],
             failed_sql=failed_sql,
@@ -260,6 +363,8 @@ class TaxiDashboardAgent:
             schema_context=schema_context,
             allowed_tables=allowed_tables,
             attempts=attempts,
+            metadata_context=state.get("metadata_context", ""),
+            conversation_context=conversation_context,
         )
         result["allowed_tables"] = allowed_tables
         return result
@@ -308,6 +413,21 @@ class TaxiDashboardAgent:
             return "sql_path"
         return "unsupported_path"
 
+    def _after_intent(self, state: DashboardState) -> str:
+        intent = state.get("intent")
+        if intent in {"sql_query", "sql_followup"}:
+            return "sql_path"
+        return "unsupported_path"
+
+    def _after_security(self, state: DashboardState) -> str:
+        sql_error = state.get("sql_error")
+        if not sql_error:
+            return "execute"
+        attempts = state.get("attempts", 0)
+        if attempts < self.settings.max_sql_retries:
+            return "retry"
+        return "failed"
+
     def _after_execute(self, state: DashboardState) -> str:
         sql_error = state.get("sql_error")
         if not sql_error:
@@ -322,8 +442,11 @@ class TaxiDashboardAgent:
         builder = StateGraph(DashboardState)
 
         builder.add_node("prepare_schema_context", self._prepare_schema_context)
+        builder.add_node("build_metadata_context", self._build_metadata_context)
         builder.add_node("route_question", self._route_question)
+        builder.add_node("determine_intent", self._determine_intent)
         builder.add_node("generate_sql", self._generate_sql)
+        builder.add_node("security_check", self._security_check)
         builder.add_node("execute_sql", self._execute_sql)
         builder.add_node("repair_sql", self._repair_sql)
         builder.add_node("answer_user", self._answer_user)
@@ -331,16 +454,34 @@ class TaxiDashboardAgent:
         builder.add_node("error_answer", self._error_answer)
 
         builder.add_edge(START, "prepare_schema_context")
-        builder.add_edge("prepare_schema_context", "route_question")
+        builder.add_edge("prepare_schema_context", "build_metadata_context")
+        builder.add_edge("build_metadata_context", "route_question")
         builder.add_conditional_edges(
             "route_question",
             self._after_route,
+            {
+                "sql_path": "determine_intent",
+                "unsupported_path": "unsupported_answer",
+            },
+        )
+        builder.add_conditional_edges(
+            "determine_intent",
+            self._after_intent,
             {
                 "sql_path": "generate_sql",
                 "unsupported_path": "unsupported_answer",
             },
         )
-        builder.add_edge("generate_sql", "execute_sql")
+        builder.add_edge("generate_sql", "security_check")
+        builder.add_conditional_edges(
+            "security_check",
+            self._after_security,
+            {
+                "execute": "execute_sql",
+                "retry": "repair_sql",
+                "failed": "error_answer",
+            },
+        )
         builder.add_conditional_edges(
             "execute_sql",
             self._after_execute,
@@ -372,9 +513,25 @@ class TaxiDashboardAgent:
                 },
             )
 
-        initial_state: DashboardState = {"question": clean_question, "attempts": 0}
+        initial_state: DashboardState = {
+            "question": clean_question,
+            "attempts": 0,
+            "previous_question": self._last_success_turn.get("question", ""),
+            "previous_sql_query": self._last_success_turn.get("sql_query", ""),
+            "previous_final_answer": self._last_success_turn.get("final_answer", ""),
+        }
         try:
             result = self.graph.invoke(initial_state)
+            if (
+                result.get("route") == "sql"
+                and not result.get("sql_error")
+                and result.get("sql_query")
+            ):
+                self._last_success_turn = {
+                    "question": clean_question,
+                    "sql_query": str(result.get("sql_query", "")),
+                    "final_answer": str(result.get("final_answer", "")),
+                }
             return cast(AgentResult, result)
         except Exception as exc:
             self.logger.exception("Graph execution failed: %s", exc)

@@ -5,7 +5,7 @@ from typing import Any, List
 import pytest
 
 from taxi_agent.config import Settings
-from taxi_agent.graph import RouteDecision, SQLDraft, TaxiDashboardAgent
+from taxi_agent.graph import IntentDecision, RouteDecision, SQLDraft, TaxiDashboardAgent
 from taxi_agent.schema import ColumnSchema, TableSchema
 
 
@@ -44,6 +44,8 @@ class FakeLLM:
         *,
         route: str = "sql",
         route_reason: str = "ok",
+        intent: str = "sql_query",
+        intent_reason: str = "standalone",
         sql_first: str = "SELECT 1",
         sql_second: str = "SELECT 1",
         answer_text: str = "answer",
@@ -52,6 +54,8 @@ class FakeLLM:
     ):
         self.route = route
         self.route_reason = route_reason
+        self.intent = intent
+        self.intent_reason = intent_reason
         self.sql_first = sql_first
         self.sql_second = sql_second
         self.answer_text = answer_text
@@ -65,6 +69,13 @@ class FakeLLM:
                 invoke=lambda messages: SimpleNamespace(
                     route=self.route,
                     reason=self.route_reason,
+                )
+            )
+        if schema is IntentDecision:
+            return SimpleNamespace(
+                invoke=lambda messages: SimpleNamespace(
+                    intent=self.intent,
+                    reason=self.intent_reason,
                 )
             )
         if schema is SQLDraft:
@@ -146,6 +157,7 @@ def test_graph_repairs_with_expanded_allowlist() -> None:
     result = agent.ask("Use table_b")
 
     assert result["route"] == "sql"
+    assert result["intent"] == "sql_query"
     assert result["sql_error"] == ""
     assert result["attempts"] == 1
     assert "table_b" in result["sql_query"].lower()
@@ -262,6 +274,33 @@ def test_graph_generation_error_then_regenerate_success() -> None:
     assert result["final_answer"] == "done"
     assert len(fake_db.queries) == 1
     assert fake_llm.sql_calls == 2
+
+
+def test_graph_followup_intent_uses_previous_turn_context() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM(
+        route="sql",
+        intent="sql_followup",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_b LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=tables)
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+
+    first = agent.ask("Show one row from table_a")
+    second = agent.ask("còn table_b thì sao?")
+
+    assert first["sql_error"] == ""
+    assert second["intent"] == "sql_followup"
+    assert second["previous_question"] == "Show one row from table_a"
+    assert "table_b" in second["sql_query"].lower()
 
 
 def test_graph_embedding_init_failure_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

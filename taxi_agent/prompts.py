@@ -11,6 +11,23 @@ Return:
 """
 
 
+INTENT_SYSTEM_PROMPT = """
+You are an intent router for a Taxi SQL dashboard.
+Classify the SQL task intent for downstream tools.
+
+User question:
+{question}
+
+Previous turn context:
+{previous_context}
+
+Return:
+- intent="sql_query" for a standalone SQL query request.
+- intent="sql_followup" for a follow-up request that depends on previous result/query.
+- intent="unsupported" if it cannot be solved from the current schema.
+"""
+
+
 SQL_GENERATOR_SYSTEM_PROMPT = """
 You are a SQL generation agent.
 Generate one PostgreSQL query for the user question.
@@ -20,6 +37,12 @@ Schema:
 
 Allowed tables:
 {allowed_tables}
+
+Metadata hints:
+{metadata_context}
+
+Conversation context:
+{conversation_context}
 
 Rules:
 1) Output exactly one SQL statement.
@@ -41,6 +64,12 @@ Schema:
 
 Allowed tables:
 {allowed_tables}
+
+Metadata hints:
+{metadata_context}
+
+Conversation context:
+{conversation_context}
 
 Rules:
 1) Output exactly one SQL statement.
