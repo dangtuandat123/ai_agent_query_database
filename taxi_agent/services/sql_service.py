@@ -8,15 +8,10 @@ from pydantic import BaseModel, Field
 
 from ..db import PostgresClient
 from ..prompts import SQL_GENERATOR_SYSTEM_PROMPT, SQL_REPAIR_SYSTEM_PROMPT
+from ..redaction import redact_sensitive_text
 from ..sql_guard import normalize_sql, validate_readonly_sql
 
 
-POSTGRES_URL_PASSWORD_PATTERN = re.compile(
-    r"(?i)(postgres(?:ql)?://[^:\s/]+:)([^@/\s]+)(@)"
-)
-DSN_PASSWORD_PATTERN = re.compile(r"(?i)(password=)([^\s]+)")
-API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key(?:\s*[:=]\s*|\s+))([^\s,;]+)")
-BEARER_PATTERN = re.compile(r"(?i)(authorization:\s*bearer\s+)([^\s]+)")
 SQL_START_PATTERN = re.compile(r"^(?:with|select)\b", re.IGNORECASE)
 
 
@@ -30,14 +25,6 @@ def _stringify_message_content(message: Any) -> str:
     if isinstance(content, str):
         return content
     return str(content)
-
-
-def redact_sensitive_text(text: str) -> str:
-    redacted = POSTGRES_URL_PASSWORD_PATTERN.sub(r"\1***\3", text)
-    redacted = DSN_PASSWORD_PATTERN.sub(r"\1***", redacted)
-    redacted = API_KEY_PATTERN.sub(r"\1***", redacted)
-    redacted = BEARER_PATTERN.sub(r"\1***", redacted)
-    return redacted
 
 
 def classify_sql_error(sql_error: str) -> str:

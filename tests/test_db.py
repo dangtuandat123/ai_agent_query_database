@@ -129,3 +129,21 @@ def test_get_table_info_cache_thread_safe(monkeypatch: Any) -> None:
     assert len(results) == 5
     assert all(item == "tables=taxi_trip_data" for item in results)
     assert created["count"] == 1
+
+
+def test_check_connection_redacts_sensitive_error(monkeypatch: Any) -> None:
+    def fake_connect(dsn: str, connect_timeout: int | None = None) -> Any:
+        _ = (dsn, connect_timeout)
+        raise RuntimeError(
+            "failed postgresql://postgres:supersecret@localhost:5432/taxi_db"
+        )
+
+    monkeypatch.setattr("taxi_agent.db.psycopg.connect", fake_connect)
+
+    client = PostgresClient(
+        dsn="postgresql://postgres:postgres@localhost:5432/taxi_db",
+    )
+    ok, message = client.check_connection()
+    assert ok is False
+    assert "supersecret" not in message
+    assert "***" in message

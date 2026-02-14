@@ -6,6 +6,7 @@ import psycopg
 from langchain_community.utilities import SQLDatabase
 from psycopg.rows import dict_row
 
+from .redaction import redact_sensitive_text
 from .schema import ColumnSchema, TableSchema
 from .sql_guard import normalize_sql, validate_readonly_sql
 
@@ -87,7 +88,7 @@ class PostgresClient:
                     cur.fetchone()
             return True, "ok"
         except Exception as exc:  # pragma: no cover
-            return False, str(exc)
+            return False, redact_sensitive_text(str(exc))
 
     def get_table_schemas(self, table_schema: str = "public") -> List[TableSchema]:
         query = """

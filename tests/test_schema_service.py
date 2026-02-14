@@ -16,6 +16,14 @@ class FakeDB:
         return self.tables
 
 
+class FailingDB(FakeDB):
+    def get_table_schemas(self, table_schema: str = "public") -> List[TableSchema]:
+        _ = table_schema
+        raise RuntimeError(
+            "could not connect postgresql://postgres:supersecret@localhost:5432/taxi_db"
+        )
+
+
 class FakeLangChainDB(FakeDB):
     def __init__(self, tables: List[TableSchema], table_info: str):
         super().__init__(tables)
@@ -264,3 +272,24 @@ def test_schema_service_reuses_cached_full_context() -> None:
     _ = service.build_for_question("q2")
     # First run: schema_context + full_context. Second run: schema_context only.
     assert db.info_calls == 3
+
+
+def test_schema_service_redacts_sensitive_connection_error() -> None:
+    tables = _tables()
+    db = FailingDB(tables)
+    retriever = FakeRetriever([tables[0]])
+    service = SchemaService(
+        db=db,  # type: ignore[arg-type]
+        schema_retriever=retriever,  # type: ignore[arg-type]
+        db_schema="public",
+        max_columns_per_table=40,
+        context_max_chars=1000,
+        full_context_max_chars=3000,
+        top_k_tables=1,
+        cache_ttl_seconds=300,
+        logger=logging.getLogger("test.schema"),
+    )
+
+    result = service.build_for_question("q")
+    assert "supersecret" not in result.schema_error
+    assert "***" in result.schema_error

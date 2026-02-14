@@ -5,6 +5,7 @@ from time import monotonic
 from typing import List, Sequence
 
 from ..db import PostgresClient
+from ..redaction import redact_sensitive_text
 from ..retrieval import SchemaRetriever
 from ..schema import TableSchema, build_schema_context, build_schema_overview
 
@@ -73,9 +74,10 @@ class SchemaService:
             context = get_table_info(table_names, table_schema=self.db_schema)
             return self._truncate_text(context, max_chars)
         except Exception as exc:
+            safe_message = redact_sensitive_text(str(exc))
             self.logger.warning(
                 "LangChain SQLDatabase table info unavailable; fallback to custom context: %s",
-                exc,
+                safe_message,
             )
             return ""
 
@@ -157,9 +159,10 @@ class SchemaService:
         try:
             all_tables = self._load_all_tables()
         except Exception as exc:
-            self.logger.error("Failed to load schema from PostgreSQL: %s", exc)
+            safe_message = redact_sensitive_text(str(exc))
+            self.logger.error("Failed to load schema from PostgreSQL: %s", safe_message)
             return SchemaContextResult(
-                schema_error=f"Cannot read schema from PostgreSQL: {exc}",
+                schema_error=f"Cannot read schema from PostgreSQL: {safe_message}",
                 schema_overview="No schema overview available.",
                 schema_context="No schema context available.",
                 schema_context_full="No schema context available.",
@@ -191,7 +194,11 @@ class SchemaService:
                 len(all_tables),
             )
         except Exception as exc:
-            self.logger.warning("Schema retrieval failed, fallback to top-k tables: %s", exc)
+            safe_message = redact_sensitive_text(str(exc))
+            self.logger.warning(
+                "Schema retrieval failed, fallback to top-k tables: %s",
+                safe_message,
+            )
             relevant_tables = all_tables[: self.top_k_tables]
 
         allowed_tables = self._build_allowlist(relevant_tables)

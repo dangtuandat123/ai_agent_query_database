@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetriever
 
+from .redaction import redact_sensitive_text
 from .schema import TableSchema
 
 try:
@@ -102,9 +103,10 @@ class SchemaRetriever:
                 except Exception as exc:
                     if isinstance(exc, ImportError):
                         self._bm25_dependency_missing = True
+                    safe_message = redact_sensitive_text(str(exc))
                     self.logger.warning(
                         "BM25 retriever unavailable; fallback to vector-only retrieval: %s",
-                        exc,
+                        safe_message,
                     )
                     self.keyword_retriever = None
             else:
@@ -131,9 +133,10 @@ class SchemaRetriever:
                     )
                 except Exception as exc:
                     # If embeddings are unavailable at runtime, keep keyword retriever only.
+                    safe_message = redact_sensitive_text(str(exc))
                     self.logger.warning(
                         "Vector retriever unavailable; fallback to BM25-only retrieval: %s",
-                        exc,
+                        safe_message,
                     )
                     self.retriever = None
 
@@ -152,9 +155,10 @@ class SchemaRetriever:
                             weights=[1.0] * len(retrievers),
                         )
                     except Exception as exc:
+                        safe_message = redact_sensitive_text(str(exc))
                         self.logger.warning(
                             "Ensemble retriever unavailable; fallback to independent retrieval: %s",
-                            exc,
+                            safe_message,
                         )
                         self.ensemble_retriever = None
 

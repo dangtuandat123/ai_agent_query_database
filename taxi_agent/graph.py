@@ -18,6 +18,7 @@ from .prompts import (
     INTENT_SYSTEM_PROMPT,
     ROUTER_SYSTEM_PROMPT,
 )
+from .redaction import redact_sensitive_text
 from .retrieval import SchemaRetriever, SchemaRetrieverConfig
 from .services.language_service import (
     empty_question_message,
@@ -215,9 +216,10 @@ class TaxiDashboardAgent:
                 check_embedding_ctx_length=False,
             )
         except Exception as exc:
+            safe_message = redact_sensitive_text(str(exc))
             self.logger.warning(
                 "Failed to initialize embedding model; fallback to BM25-only retrieval: %s",
-                exc,
+                safe_message,
             )
             return None
 
@@ -258,8 +260,9 @@ class TaxiDashboardAgent:
                 "attempts": state.get("attempts", 0),
             }
         except Exception as exc:
-            self.logger.error("Router error: %s", exc)
-            extracted_route = self._extract_route_from_text(str(exc))
+            safe_message = redact_sensitive_text(str(exc))
+            self.logger.error("Router error: %s", safe_message)
+            extracted_route = self._extract_route_from_text(safe_message)
             if extracted_route:
                 return {
                     "route": extracted_route,
@@ -386,7 +389,12 @@ class TaxiDashboardAgent:
             )
             return parser.parse(_stringify_content(response.content))
         except Exception as exc:
-            self.logger.warning("%s parser fallback failed: %s", parser_name, exc)
+            safe_message = redact_sensitive_text(str(exc))
+            self.logger.warning(
+                "%s parser fallback failed: %s",
+                parser_name,
+                safe_message,
+            )
             return None
 
     def _determine_intent(self, state: DashboardState) -> DashboardState:
@@ -412,8 +420,11 @@ class TaxiDashboardAgent:
             self.logger.info("Intent decision=%s", decision.intent)
             return {"intent": decision.intent, "intent_reason": decision.reason}
         except Exception as exc:
-            self.logger.warning("Intent router failed, fallback to sql_query: %s", exc)
-            extracted_intent = self._extract_intent_from_text(str(exc))
+            safe_message = redact_sensitive_text(str(exc))
+            self.logger.warning(
+                "Intent router failed, fallback to sql_query: %s", safe_message
+            )
+            extracted_intent = self._extract_intent_from_text(safe_message)
             if extracted_intent:
                 return {
                     "intent": extracted_intent,
@@ -574,7 +585,10 @@ class TaxiDashboardAgent:
             )
             return {"final_answer": _stringify_content(response.content)}
         except Exception as exc:
-            self.logger.warning("Answer LLM failed, using fallback message: %s", exc)
+            safe_message = redact_sensitive_text(str(exc))
+            self.logger.warning(
+                "Answer LLM failed, using fallback message: %s", safe_message
+            )
             if not rows:
                 return {"final_answer": fallback_no_data_message(question)}
             return {"final_answer": fallback_success_message(question, len(rows))}
@@ -734,8 +748,8 @@ class TaxiDashboardAgent:
                 )
             return cast(AgentResult, result)
         except Exception as exc:
-            self.logger.exception("Graph execution failed: %s", exc)
-            message = str(exc)
+            message = redact_sensitive_text(str(exc))
+            self.logger.error("Graph execution failed: %s", message)
             return cast(
                 AgentResult,
                 {

@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
 
 from taxi_agent.config import load_settings
 from taxi_agent.graph import TaxiDashboardAgent
+from taxi_agent.redaction import redact_sensitive_text
 
 
 QUESTIONS = [
@@ -19,15 +20,22 @@ QUESTIONS = [
 
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8")
+        try:
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
 
     load_dotenv()
     try:
         settings = load_settings()
     except Exception as exc:
-        print(f"Cannot run smoke test: {exc}")
+        safe_message = redact_sensitive_text(str(exc))
+        print(f"Cannot run smoke test: {safe_message}")
         return 1
 
     agent = TaxiDashboardAgent(settings)
@@ -35,7 +43,8 @@ def main() -> int:
         output_file = agent.save_workflow_mermaid("agent_workflow.mmd")
         print(f"Workflow written to: {Path(output_file)}")
     except Exception as exc:
-        print(f"Workflow render/save skipped due to error: {exc}")
+        safe_message = redact_sensitive_text(str(exc))
+        print(f"Workflow render/save skipped due to error: {safe_message}")
 
     for index, question in enumerate(QUESTIONS, start=1):
         print(f"\n--- Smoke case {index} ---")

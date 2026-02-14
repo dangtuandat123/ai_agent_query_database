@@ -148,6 +148,44 @@ class IntentPayloadFailureLLM(FakeLLM):
         return super().with_structured_output(schema)
 
 
+class RouteJSONFallbackLLM(FakeLLM):
+    def with_structured_output(self, schema: Any) -> Any:
+        if schema is RouteDecision:
+            return SimpleNamespace(
+                invoke=lambda messages: (_ for _ in ()).throw(
+                    RuntimeError("router parse failed")
+                )
+            )
+        return super().with_structured_output(schema)
+
+    def invoke(self, messages: Any) -> Any:
+        prompt = str(messages[0].content).lower() if messages else ""
+        if "routing agent" in prompt:
+            return SimpleNamespace(
+                content='{"route":"unsupported","reason":"json parser fallback"}'
+            )
+        return super().invoke(messages)
+
+
+class IntentJSONFallbackLLM(FakeLLM):
+    def with_structured_output(self, schema: Any) -> Any:
+        if schema is IntentDecision:
+            return SimpleNamespace(
+                invoke=lambda messages: (_ for _ in ()).throw(
+                    RuntimeError("intent parse failed")
+                )
+            )
+        return super().with_structured_output(schema)
+
+    def invoke(self, messages: Any) -> Any:
+        prompt = str(messages[0].content).lower() if messages else ""
+        if "intent router" in prompt:
+            return SimpleNamespace(
+                content='{"intent":"sql_followup","reason":"json parser fallback"}'
+            )
+        return super().invoke(messages)
+
+
 def _settings() -> Settings:
     return Settings(
         postgres_dsn="postgresql://postgres:postgres@localhost:5432/taxi_db",
@@ -294,6 +332,24 @@ def test_graph_router_payload_error_recovers_route_literal() -> None:
     assert "parser error payload" in result["route_reason"].lower()
 
 
+def test_graph_router_parser_fallback_uses_json_output() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[])
+    fake_llm = RouteJSONFallbackLLM()
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Show one row from table_a")
+
+    assert result["route"] == "unsupported"
+    assert result["route_reason"] == "json parser fallback"
+
+
 def test_graph_intent_payload_error_recovers_intent_literal() -> None:
     tables = _tables()
     fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
@@ -315,6 +371,30 @@ def test_graph_intent_payload_error_recovers_intent_literal() -> None:
 
     assert result["route"] == "sql"
     assert result["intent"] == "sql_followup"
+
+
+def test_graph_intent_parser_fallback_uses_json_output() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = IntentJSONFallbackLLM(
+        route="sql",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("So sánh với truy vấn trước")
+
+    assert result["route"] == "sql"
+    assert result["intent"] == "sql_followup"
+    assert result["intent_reason"] == "json parser fallback"
 
 
 def test_graph_unsupported_intent_uses_intent_reason() -> None:
@@ -840,3 +920,32 @@ def test_graph_internal_failure_returns_safe_response() -> None:
     assert result["sql_error_type"] == "internal"
     assert "graph crashed" in result["sql_error"]
     assert "internal error" in result["final_answer"].lower()
+
+
+def test_graph_internal_failure_redacts_sensitive_tokens() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = FakeLLM()
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+
+    class BrokenGraph:
+        def invoke(self, state: Any) -> Any:
+            _ = state
+            raise RuntimeError(
+                "graph crashed with postgresql://postgres:supersecret@localhost:5432/taxi_db"
+            )
+
+    agent.graph = BrokenGraph()  # type: ignore[assignment]
+    result = agent.ask("How many trips?")
+
+    assert result["route"] == "unsupported"
+    assert result["sql_error_type"] == "internal"
+    assert "supersecret" not in result["sql_error"]
+    assert "***" in result["sql_error"]

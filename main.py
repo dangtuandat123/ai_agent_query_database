@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from taxi_agent.config import load_settings
 from taxi_agent.graph import TaxiDashboardAgent
+from taxi_agent.redaction import redact_sensitive_text
 
 
 DEFAULT_TEST_QUESTION = (
@@ -69,7 +70,8 @@ def main() -> int:
     try:
         settings = load_settings()
     except Exception as exc:
-        print(f"Configuration error: {exc}")
+        safe_message = redact_sensitive_text(str(exc))
+        print(f"Configuration error: {safe_message}")
         return 1
     configure_logging(settings.log_level)
 
@@ -84,11 +86,12 @@ def main() -> int:
         print(workflow_mermaid)
         print(f"\nWorkflow file saved at: {workflow_file}\n")
     except Exception as exc:
+        safe_message = redact_sensitive_text(str(exc))
         logging.getLogger(__name__).warning(
             "Workflow render/save failed: %s",
-            exc,
+            safe_message,
         )
-        print(f"Workflow render/save skipped due to error: {exc}\n")
+        print(f"Workflow render/save skipped due to error: {safe_message}\n")
 
     try:
         ask_signature = inspect.signature(agent.ask)
@@ -109,8 +112,9 @@ def main() -> int:
                     "Agent.ask() signature does not expose thread_id; using default thread.",
                 )
     except Exception as exc:
-        logging.getLogger(__name__).exception("Agent execution failed: %s", exc)
-        print(f"Runtime error: {exc}")
+        safe_message = redact_sensitive_text(str(exc))
+        logging.getLogger(__name__).error("Agent execution failed: %s", safe_message)
+        print(f"Runtime error: {safe_message}")
         return 1
 
     print("=== Taxi Agent Database Dashboard ===")

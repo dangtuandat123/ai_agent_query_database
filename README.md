@@ -110,6 +110,7 @@ python smoke_run.py
 - Query timeout is configurable via `QUERY_TIMEOUT_MS` (default: 30000ms).
 - DB connect timeout is configurable via `DB_CONNECT_TIMEOUT_SECONDS` (default: 10s).
   Used by both the agent runtime and data loader.
+- Error/log messages apply basic secret redaction for DSN passwords and API keys.
 - SQL repair auto-expands from retrieved schema to full schema when needed.
 - DB execution pins `search_path` to `DB_SCHEMA` for safer schema isolation.
   - `DB_SCHEMA` must be a single unquoted PostgreSQL schema identifier.

@@ -199,6 +199,39 @@ def test_main_returns_error_code_on_runtime_failure(monkeypatch, capsys) -> None
     assert "Runtime error: boom" in out
 
 
+def test_main_runtime_error_redacts_sensitive_tokens(monkeypatch, capsys) -> None:
+    class FakeAgent:
+        def __init__(self, settings: Settings) -> None:
+            _ = settings
+
+        def get_workflow_mermaid(self) -> str:
+            return "graph TD;"
+
+        def save_workflow_mermaid(self, file_path: str = "agent_workflow.mmd") -> str:
+            _ = file_path
+            return "agent_workflow.mmd"
+
+        def ask(self, question: str, thread_id: str = "default"):
+            _ = (question, thread_id)
+            raise RuntimeError(
+                "failed with postgresql://postgres:supersecret@localhost:5432/taxi_db"
+            )
+
+    monkeypatch.setattr(
+        "main.parse_args",
+        lambda: argparse.Namespace(question="abc", thread_id="demo"),
+    )
+    monkeypatch.setattr("main.load_dotenv", lambda: None)
+    monkeypatch.setattr("main.load_settings", _settings)
+    monkeypatch.setattr("main.TaxiDashboardAgent", FakeAgent)
+
+    exit_code = run_main()
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "supersecret" not in out
+    assert "***" in out
+
+
 def test_main_prints_sql_error_type_when_present(monkeypatch, capsys) -> None:
     class FakeAgent:
         def __init__(self, settings: Settings) -> None:
