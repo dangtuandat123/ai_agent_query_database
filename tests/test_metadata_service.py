@@ -41,3 +41,19 @@ def test_metadata_context_handles_year_month_without_crash() -> None:
         schema_context="Table: public.taxi_trip_data\nColumns:\n- payment_type (integer)\n",
     )
     assert "2018/03" in context
+
+
+def test_metadata_context_matches_columns_with_vietnamese_diacritics() -> None:
+    service = MetadataContextService(max_chars=2000)
+    context = service.build(
+        question="Trong tháng 3/2018, hãy tính thẳng theo bảng taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+        schema_context=(
+            "Table: public.taxi_trip_data\n"
+            "Columns:\n"
+            "- thang (integer)\n"
+            "- payment_type (integer)\n"
+        ),
+    )
+    assert "likely columns" in context
+    assert "thang" in context

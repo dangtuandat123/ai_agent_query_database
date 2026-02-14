@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Any, Dict, List, Tuple
 
 import psycopg
@@ -26,24 +27,30 @@ class PostgresClient:
         self.connect_timeout_seconds = connect_timeout_seconds
         self.logger = logger or logging.getLogger(__name__)
         self._sql_db_by_schema: Dict[str, SQLDatabase] = {}
+        self._sql_db_lock = threading.Lock()
 
     def _get_sql_database(self, table_schema: str) -> SQLDatabase:
         cached = self._sql_db_by_schema.get(table_schema)
         if cached is not None:
             return cached
 
-        sql_db = SQLDatabase.from_uri(
-            self.dsn,
-            engine_args={
-                "connect_args": {
-                    "connect_timeout": self.connect_timeout_seconds,
-                }
-            },
-            schema=table_schema,
-            sample_rows_in_table_info=0,
-        )
-        self._sql_db_by_schema[table_schema] = sql_db
-        return sql_db
+        with self._sql_db_lock:
+            cached = self._sql_db_by_schema.get(table_schema)
+            if cached is not None:
+                return cached
+
+            sql_db = SQLDatabase.from_uri(
+                self.dsn,
+                engine_args={
+                    "connect_args": {
+                        "connect_timeout": self.connect_timeout_seconds,
+                    }
+                },
+                schema=table_schema,
+                sample_rows_in_table_info=0,
+            )
+            self._sql_db_by_schema[table_schema] = sql_db
+            return sql_db
 
     def run_query(self, sql: str) -> List[Dict[str, Any]]:
         with psycopg.connect(

@@ -1,3 +1,5 @@
+import threading
+import time
 from typing import Any
 
 from taxi_agent.db import PostgresClient
@@ -93,3 +95,37 @@ def test_get_table_info_uses_langchain_sqldatabase_cache(monkeypatch: Any) -> No
     assert captured_kwargs["schema"] == "public"
     assert captured_kwargs["sample_rows_in_table_info"] == 0
     assert captured_kwargs["engine_args"]["connect_args"]["connect_timeout"] == 10
+
+
+def test_get_table_info_cache_thread_safe(monkeypatch: Any) -> None:
+    created = {"count": 0}
+
+    class FakeSQLDatabase:
+        def get_table_info(self, table_names: list[str]) -> str:
+            return f"tables={','.join(table_names)}"
+
+    def fake_from_uri(*args: Any, **kwargs: Any) -> FakeSQLDatabase:
+        _ = (args, kwargs)
+        time.sleep(0.05)
+        created["count"] += 1
+        return FakeSQLDatabase()
+
+    monkeypatch.setattr("taxi_agent.db.SQLDatabase.from_uri", fake_from_uri)
+
+    client = PostgresClient(
+        dsn="postgresql://postgres:postgres@localhost:5432/taxi_db",
+    )
+    results: list[str] = []
+
+    def worker() -> None:
+        results.append(client.get_table_info(["taxi_trip_data"], table_schema="public"))
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 5
+    assert all(item == "tables=taxi_trip_data" for item in results)
+    assert created["count"] == 1

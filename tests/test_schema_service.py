@@ -106,6 +106,28 @@ def test_schema_service_cache_can_be_disabled() -> None:
     assert db.calls == 2
 
 
+def test_schema_service_invalidate_cache_forces_reload() -> None:
+    tables = _tables()
+    db = FakeDB(tables)
+    retriever = FakeRetriever([tables[0]])
+    service = SchemaService(
+        db=db,  # type: ignore[arg-type]
+        schema_retriever=retriever,  # type: ignore[arg-type]
+        db_schema="public",
+        max_columns_per_table=40,
+        context_max_chars=1000,
+        full_context_max_chars=3000,
+        top_k_tables=1,
+        cache_ttl_seconds=300,
+        logger=logging.getLogger("test.schema"),
+    )
+
+    _ = service.build_for_question("q1")
+    service.invalidate_cache()
+    _ = service.build_for_question("q2")
+    assert db.calls == 2
+
+
 def test_schema_service_fallback_when_retriever_fails() -> None:
     tables = _tables()
     db = FakeDB(tables)

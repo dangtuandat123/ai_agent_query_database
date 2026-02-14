@@ -1,4 +1,5 @@
 import logging
+import threading
 from dataclasses import dataclass
 from time import monotonic
 from typing import List, Sequence
@@ -45,6 +46,7 @@ class SchemaService:
         self._cached_tables: List[TableSchema] = []
         self._cache_loaded: bool = False
         self._cache_expiry: float = 0.0
+        self._cache_lock = threading.RLock()
 
     @staticmethod
     def _truncate_text(value: str, max_chars: int) -> str:
@@ -92,22 +94,28 @@ class SchemaService:
         return self._cache_loaded and monotonic() < self._cache_expiry
 
     def _load_all_tables(self) -> List[TableSchema]:
-        if self._is_cache_valid():
-            self.logger.info("Schema cache hit (%d tables).", len(self._cached_tables))
-            return self._cached_tables
+        with self._cache_lock:
+            if self._is_cache_valid():
+                self.logger.info("Schema cache hit (%d tables).", len(self._cached_tables))
+                return list(self._cached_tables)
 
-        self.logger.info("Schema cache miss; loading from PostgreSQL.")
-        tables = self.db.get_table_schemas(table_schema=self.db_schema)
-        self._cached_tables = tables
-        self._cache_loaded = True
-        self._cache_expiry = monotonic() + self.cache_ttl_seconds
-        self.logger.info("Loaded %d tables for schema '%s'.", len(tables), self.db_schema)
-        return tables
+            self.logger.info("Schema cache miss; loading from PostgreSQL.")
+            tables = self.db.get_table_schemas(table_schema=self.db_schema)
+            self._cached_tables = list(tables)
+            self._cache_loaded = True
+            self._cache_expiry = monotonic() + self.cache_ttl_seconds
+            self.logger.info(
+                "Loaded %d tables for schema '%s'.",
+                len(self._cached_tables),
+                self.db_schema,
+            )
+            return list(self._cached_tables)
 
     def invalidate_cache(self) -> None:
-        self._cached_tables = []
-        self._cache_loaded = False
-        self._cache_expiry = 0.0
+        with self._cache_lock:
+            self._cached_tables = []
+            self._cache_loaded = False
+            self._cache_expiry = 0.0
 
     @staticmethod
     def _build_allowlist(tables: Sequence[TableSchema]) -> List[str]:

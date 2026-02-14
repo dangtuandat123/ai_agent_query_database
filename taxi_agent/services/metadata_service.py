@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from typing import List
 
 
@@ -30,6 +31,12 @@ def _tokenize(text: str) -> List[str]:
     return [match.group(0).lower() for match in TOKEN_PATTERN.finditer(text)]
 
 
+def _normalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", text.lower())
+    without_marks = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    return without_marks.replace("đ", "d")
+
+
 def _truncate(value: str, max_chars: int) -> str:
     if max_chars <= 0 or len(value) <= max_chars:
         return value
@@ -51,17 +58,20 @@ class MetadataContextService:
         allowed_tables: List[str],
         schema_context: str,
     ) -> str:
-        question_lower = question.lower()
-        question_tokens = set(_tokenize(question_lower))
+        question_normalized = _normalize_text(question)
+        question_tokens = set(_tokenize(question_normalized))
 
         matched_tables: List[str] = []
         for table_name in allowed_tables:
-            normalized = table_name.lower()
-            short_name = normalized.split(".")[-1]
-            if normalized in question_lower or short_name in question_tokens:
-                matched_tables.append(normalized)
+            normalized_table = _normalize_text(table_name)
+            short_name = normalized_table.split(".")[-1]
+            if (
+                normalized_table in question_normalized
+                or short_name in question_tokens
+            ):
+                matched_tables.append(table_name.lower())
 
-        schema_tokens = set(_tokenize(schema_context.lower()))
+        schema_tokens = set(_tokenize(_normalize_text(schema_context)))
         likely_columns = sorted(
             {
                 token

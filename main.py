@@ -47,6 +47,7 @@ def configure_logging(level: str) -> None:
     logging.basicConfig(
         level=numeric_level,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        force=True,
     )
     # Keep third-party transport noise out of normal runs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
