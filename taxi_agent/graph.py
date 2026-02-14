@@ -1,10 +1,12 @@
 import json
 import logging
 from pathlib import Path
+import re
 import threading
 from typing import Any, Dict, Literal, Optional, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.output_parsers import PydanticOutputParser
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
@@ -36,7 +38,7 @@ class RouteDecision(BaseModel):
     route: Literal["sql", "unsupported"] = Field(
         ..., description="Route name: sql or unsupported"
     )
-    reason: str = Field(..., description="Short reason for route")
+    reason: str = Field("", description="Short reason for route")
 
 
 class SQLDraft(BaseModel):
@@ -49,7 +51,7 @@ class IntentDecision(BaseModel):
         ...,
         description="Task intent classification.",
     )
-    reason: str = Field(..., description="Short reason for selected intent")
+    reason: str = Field("", description="Short reason for selected intent")
 
 
 def _stringify_content(content: Any) -> str:
@@ -102,6 +104,10 @@ class TaxiDashboardAgent:
         self.router_llm = self.llm.with_structured_output(RouteDecision)
         self.intent_llm = self.llm.with_structured_output(IntentDecision)
         self.sql_llm = self.llm.with_structured_output(SQLDraft)
+        self.route_output_parser = PydanticOutputParser(pydantic_object=RouteDecision)
+        self.intent_output_parser = PydanticOutputParser(
+            pydantic_object=IntentDecision
+        )
 
         self.schema_service = SchemaService(
             db=self.db,
@@ -119,6 +125,7 @@ class TaxiDashboardAgent:
             db=self.db,
             logger=self.sql_logger,
             row_limit=settings.query_row_limit,
+            raw_llm=self.llm,
         )
         self.metadata_service = MetadataContextService(max_chars=3000)
         self._conversation_memory: Dict[str, Dict[str, str]] = {}
@@ -236,14 +243,11 @@ class TaxiDashboardAgent:
 
         question = state["question"]
         schema_overview = state.get("schema_overview", "No schema overview available.")
+        route_prompt = ROUTER_SYSTEM_PROMPT.format(schema_overview=schema_overview)
         try:
             decision = self.router_llm.invoke(
                 [
-                    SystemMessage(
-                        content=ROUTER_SYSTEM_PROMPT.format(
-                            schema_overview=schema_overview
-                        )
-                    ),
+                    SystemMessage(content=route_prompt),
                     HumanMessage(content=question),
                 ]
             )
@@ -255,9 +259,36 @@ class TaxiDashboardAgent:
             }
         except Exception as exc:
             self.logger.error("Router error: %s", exc)
+            extracted_route = self._extract_route_from_text(str(exc))
+            if extracted_route:
+                return {
+                    "route": extracted_route,
+                    "route_reason": "Recovered route from parser error payload.",
+                    "attempts": state.get("attempts", 0),
+                }
+
+            parsed = self._invoke_parser_fallback(
+                parser=self.route_output_parser,
+                system_prompt=route_prompt,
+                user_input=question,
+                parser_name="Router",
+            )
+            if parsed is not None:
+                self.logger.info("Route parser fallback decision=%s", parsed.route)
+                return {
+                    "route": parsed.route,
+                    "route_reason": parsed.reason,
+                    "attempts": state.get("attempts", 0),
+                }
+
+            fallback_route = self._heuristic_route_question(question)
+            self.logger.warning(
+                "Router structured parsing failed; heuristic route=%s applied.",
+                fallback_route,
+            )
             return {
-                "route": "unsupported",
-                "route_reason": f"Router error: {exc}",
+                "route": fallback_route,
+                "route_reason": "Heuristic fallback due to router parsing failure.",
                 "attempts": state.get("attempts", 0),
             }
 
@@ -288,6 +319,76 @@ class TaxiDashboardAgent:
             f"Previous answer summary: {previous_final_answer or 'n/a'}"
         )
 
+    @staticmethod
+    def _heuristic_route_question(question: str) -> str:
+        normalized = normalize_for_matching(question)
+        unsupported_hints = (
+            "weather",
+            "temperature",
+            "bitcoin",
+            "stock price",
+            "football",
+            "soccer",
+            "news",
+            "write file",
+            "web browse",
+            "delete table",
+            "drop table",
+            "insert into",
+            "update set",
+            "create database",
+        )
+        if any(hint in normalized for hint in unsupported_hints):
+            return "unsupported"
+        return "sql"
+
+    @staticmethod
+    def _extract_route_from_text(text: str) -> Optional[str]:
+        match = re.search(
+            r'["\']?route["\']?\s*[:=]\s*["\']?(sql|unsupported)',
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).lower()
+        return None
+
+    @staticmethod
+    def _extract_intent_from_text(text: str) -> Optional[str]:
+        match = re.search(
+            r'["\']?intent["\']?\s*[:=]\s*["\']?(sql_query|sql_followup|unsupported)',
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).lower()
+        return None
+
+    def _invoke_parser_fallback(
+        self,
+        *,
+        parser: PydanticOutputParser,
+        system_prompt: str,
+        user_input: str,
+        parser_name: str,
+    ) -> Optional[Any]:
+        fallback_prompt = (
+            f"{system_prompt}\n\n"
+            "Return valid JSON only.\n"
+            f"{parser.get_format_instructions()}"
+        )
+        try:
+            response = self.llm.invoke(
+                [
+                    SystemMessage(content=fallback_prompt),
+                    HumanMessage(content=user_input),
+                ]
+            )
+            return parser.parse(_stringify_content(response.content))
+        except Exception as exc:
+            self.logger.warning("%s parser fallback failed: %s", parser_name, exc)
+            return None
+
     def _determine_intent(self, state: DashboardState) -> DashboardState:
         if state.get("route") != "sql":
             return {
@@ -297,15 +398,14 @@ class TaxiDashboardAgent:
 
         question = state["question"]
         previous_context = self._build_previous_context_text(state)
+        intent_prompt = INTENT_SYSTEM_PROMPT.format(
+            question=question,
+            previous_context=previous_context,
+        )
         try:
             decision = self.intent_llm.invoke(
                 [
-                    SystemMessage(
-                        content=INTENT_SYSTEM_PROMPT.format(
-                            question=question,
-                            previous_context=previous_context,
-                        )
-                    ),
+                    SystemMessage(content=intent_prompt),
                     HumanMessage(content=question),
                 ]
             )
@@ -313,6 +413,22 @@ class TaxiDashboardAgent:
             return {"intent": decision.intent, "intent_reason": decision.reason}
         except Exception as exc:
             self.logger.warning("Intent router failed, fallback to sql_query: %s", exc)
+            extracted_intent = self._extract_intent_from_text(str(exc))
+            if extracted_intent:
+                return {
+                    "intent": extracted_intent,
+                    "intent_reason": "Recovered intent from parser error payload.",
+                }
+
+            parsed = self._invoke_parser_fallback(
+                parser=self.intent_output_parser,
+                system_prompt=intent_prompt,
+                user_input=question,
+                parser_name="Intent",
+            )
+            if parsed is not None:
+                return {"intent": parsed.intent, "intent_reason": parsed.reason}
+
             normalized_question = normalize_for_matching(question)
             followup_hints = (
                 "con",

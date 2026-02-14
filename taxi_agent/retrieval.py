@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import hashlib
 import logging
 import threading
 from typing import Dict, List, Optional, Sequence
@@ -45,11 +46,18 @@ class SchemaRetriever:
         self._state_lock = threading.RLock()
 
     def _make_schema_fingerprint(self, tables: Sequence[TableSchema]) -> str:
-        parts = []
-        for table in tables:
-            cols = ",".join(f"{c.column_name}:{c.data_type}" for c in table.columns)
-            parts.append(f"{table.full_name}|{cols}")
-        return "||".join(parts)
+        hasher = hashlib.sha256()
+        sorted_tables = sorted(tables, key=lambda t: t.full_name.lower())
+        for table in sorted_tables:
+            hasher.update(table.full_name.lower().encode("utf-8"))
+            hasher.update(b"|")
+            for column in sorted(table.columns, key=lambda c: c.ordinal_position):
+                hasher.update(column.column_name.lower().encode("utf-8"))
+                hasher.update(b":")
+                hasher.update(column.data_type.lower().encode("utf-8"))
+                hasher.update(b";")
+            hasher.update(b"||")
+        return hasher.hexdigest()
 
     def _table_to_document(self, table: TableSchema) -> Document:
         column_lines = [f"- {c.column_name} ({c.data_type})" for c in table.columns]

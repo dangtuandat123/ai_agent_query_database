@@ -212,6 +212,17 @@ def test_ensemble_retriever_preferred_when_available(monkeypatch) -> None:
     assert FakeEnsembleRetriever.instances == 1
 
 
+def test_schema_fingerprint_stable_across_table_order() -> None:
+    retriever = SchemaRetriever(
+        embedding_model=None,
+        config=SchemaRetrieverConfig(top_k_tables=1, search_type="mmr", fetch_k=20),
+    )
+    tables = _sample_tables()
+    fingerprint_a = retriever._make_schema_fingerprint(tables)
+    fingerprint_b = retriever._make_schema_fingerprint(list(reversed(tables)))
+    assert fingerprint_a == fingerprint_b
+
+
 def test_retriever_refresh_and_retrieve_thread_safe() -> None:
     retriever = SchemaRetriever(
         embedding_model=None,

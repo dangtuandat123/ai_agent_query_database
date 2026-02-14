@@ -44,8 +44,8 @@ def is_probably_vietnamese(text: str) -> bool:
 def fallback_no_data_message(question: str) -> str:
     if is_probably_vietnamese(question):
         return (
-            "Kh\u00f4ng c\u00f3 d\u1eef li\u1ec7u ph\u00f9 h\u1ee3p "
-            "v\u1edbi \u0111i\u1ec1u ki\u1ec7n truy v\u1ea5n."
+            "Không có dữ liệu phù hợp "
+            "với điều kiện truy vấn."
         )
     return "No matching data was found for the query conditions."
 
@@ -53,8 +53,8 @@ def fallback_no_data_message(question: str) -> str:
 def fallback_success_message(question: str, row_count: int) -> str:
     if is_probably_vietnamese(question):
         return (
-            f"\u0110\u00e3 truy v\u1ea5n th\u00e0nh c\u00f4ng {row_count} d\u00f2ng "
-            "(hi\u1ec3n th\u1ecb t\u1ed1i \u0111a theo c\u1ea5u h\u00ecnh)."
+            f"Đã truy vấn thành công {row_count} dòng "
+            "(hiển thị tối đa theo cấu hình)."
         )
     return f"Query succeeded with {row_count} rows (showing up to configured limit)."
 
@@ -62,9 +62,9 @@ def fallback_success_message(question: str, row_count: int) -> str:
 def unsupported_message(question: str, reason: str) -> str:
     if is_probably_vietnamese(question):
         return (
-            "Kh\u00f4ng th\u1ec3 tr\u1ea3 l\u1eddi y\u00eau c\u1ea7u n\u00e0y "
-            "t\u1eeb schema PostgreSQL hi\u1ec7n t\u1ea1i.\n"
-            f"L\u00fd do: {reason}"
+            "Không thể trả lời yêu cầu này "
+            "từ schema PostgreSQL hiện tại.\n"
+            f"Lý do: {reason}"
         )
     return (
         "I cannot answer this request from the current PostgreSQL schema.\n"
@@ -75,11 +75,11 @@ def unsupported_message(question: str, reason: str) -> str:
 def error_after_retry_message(question: str, sql_query: str, sql_error: str) -> str:
     if is_probably_vietnamese(question):
         return (
-            "Th\u1ef1c thi truy v\u1ea5n th\u1ea5t b\u1ea1i sau khi \u0111\u00e3 "
-            "th\u1eed s\u1eeda SQL.\n"
-            f"C\u00e2u h\u1ecfi: {question}\n"
+            "Thực thi truy vấn thất bại sau khi đã "
+            "thử sửa SQL.\n"
+            f"Câu hỏi: {question}\n"
             f"SQL: {sql_query}\n"
-            f"L\u1ed7i: {sql_error}"
+            f"Lỗi: {sql_error}"
         )
     return (
         "Query execution failed after retry.\n"

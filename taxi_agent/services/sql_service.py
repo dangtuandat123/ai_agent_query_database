@@ -1,11 +1,43 @@
 import logging
+import re
 from typing import Any, Dict, List
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
 
 from ..db import PostgresClient
 from ..prompts import SQL_GENERATOR_SYSTEM_PROMPT, SQL_REPAIR_SYSTEM_PROMPT
 from ..sql_guard import normalize_sql, validate_readonly_sql
+
+
+POSTGRES_URL_PASSWORD_PATTERN = re.compile(
+    r"(?i)(postgres(?:ql)?://[^:\s/]+:)([^@/\s]+)(@)"
+)
+DSN_PASSWORD_PATTERN = re.compile(r"(?i)(password=)([^\s]+)")
+API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key(?:\s*[:=]\s*|\s+))([^\s,;]+)")
+BEARER_PATTERN = re.compile(r"(?i)(authorization:\s*bearer\s+)([^\s]+)")
+SQL_START_PATTERN = re.compile(r"^(?:with|select)\b", re.IGNORECASE)
+
+
+class SQLDraftOutput(BaseModel):
+    sql: str = Field(..., description="A single valid PostgreSQL SELECT query")
+    reasoning: str = Field("", description="Short explanation")
+
+
+def _stringify_message_content(message: Any) -> str:
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    return str(content)
+
+
+def redact_sensitive_text(text: str) -> str:
+    redacted = POSTGRES_URL_PASSWORD_PATTERN.sub(r"\1***\3", text)
+    redacted = DSN_PASSWORD_PATTERN.sub(r"\1***", redacted)
+    redacted = API_KEY_PATTERN.sub(r"\1***", redacted)
+    redacted = BEARER_PATTERN.sub(r"\1***", redacted)
+    return redacted
 
 
 def classify_sql_error(sql_error: str) -> str:
@@ -56,11 +88,68 @@ class SQLService:
         db: PostgresClient,
         logger: logging.Logger,
         row_limit: int = 100,
+        raw_llm: Any | None = None,
     ):
         self.sql_llm = sql_llm
+        self.raw_llm = raw_llm
         self.db = db
         self.logger = logger
         self.row_limit = row_limit
+        self.sql_output_parser = PydanticOutputParser(pydantic_object=SQLDraftOutput)
+
+    @staticmethod
+    def _is_select_like_sql(sql: str) -> bool:
+        return bool(SQL_START_PATTERN.match(sql.strip()))
+
+    @staticmethod
+    def _append_json_instructions(
+        messages: List[Any], format_instructions: str
+    ) -> List[Any]:
+        if not messages:
+            return messages
+        first = messages[0]
+        if isinstance(first, SystemMessage):
+            enhanced = SystemMessage(
+                content=(
+                    f"{first.content}\n\n"
+                    "Return valid JSON only.\n"
+                    f"{format_instructions}"
+                )
+            )
+            return [enhanced, *messages[1:]]
+        return messages
+
+    def _invoke_sql_draft_with_fallback(self, messages: List[Any]) -> Any:
+        try:
+            return self.sql_llm.invoke(messages)
+        except Exception as structured_exc:
+            err_type = classify_sql_error(str(structured_exc))
+            if err_type in {"provider", "connection"}:
+                raise
+
+            self.logger.warning(
+                "Structured SQL output failed; attempting parser fallback: %s",
+                redact_sensitive_text(str(structured_exc)),
+            )
+            if self.raw_llm is None:
+                raise
+
+            fallback_messages = self._append_json_instructions(
+                messages,
+                self.sql_output_parser.get_format_instructions(),
+            )
+            raw_response = self.raw_llm.invoke(fallback_messages)
+            raw_content = _stringify_message_content(raw_response)
+            try:
+                return self.sql_output_parser.parse(raw_content)
+            except Exception:
+                sql_candidate = normalize_sql(raw_content)
+                if sql_candidate and self._is_select_like_sql(sql_candidate):
+                    return SQLDraftOutput(
+                        sql=sql_candidate,
+                        reasoning="Fallback parsed from raw model output.",
+                    )
+                raise structured_exc
 
     def generate_sql(
         self,
@@ -82,26 +171,22 @@ class SQLService:
             }
 
         allowed_tables_text = ", ".join(allowed_tables)
-        try:
-            draft = self.sql_llm.invoke(
-                [
-                    SystemMessage(
-                        content=SQL_GENERATOR_SYSTEM_PROMPT.format(
-                            schema_text=schema_context,
-                            allowed_tables=allowed_tables_text,
-                            metadata_context=(
-                                metadata_context.strip() or "No metadata hints."
-                            ),
-                            conversation_context=(
-                                conversation_context.strip()
-                                or "No prior conversation context."
-                            ),
-                            row_limit=self.row_limit,
-                        )
+        messages = [
+            SystemMessage(
+                content=SQL_GENERATOR_SYSTEM_PROMPT.format(
+                    schema_text=schema_context,
+                    allowed_tables=allowed_tables_text,
+                    metadata_context=(metadata_context.strip() or "No metadata hints."),
+                    conversation_context=(
+                        conversation_context.strip() or "No prior conversation context."
                     ),
-                    HumanMessage(content=question),
-                ]
-            )
+                    row_limit=self.row_limit,
+                )
+            ),
+            HumanMessage(content=question),
+        ]
+        try:
+            draft = self._invoke_sql_draft_with_fallback(messages)
             sql_query = normalize_sql(draft.sql)
             if not sql_query:
                 msg = "SQL generation failed: model returned empty SQL."
@@ -122,15 +207,19 @@ class SQLService:
                 "sql_error_message": "",
             }
         except Exception as exc:
-            msg = f"SQL generation failed: {exc}"
+            raw_message = str(exc)
+            err_type = classify_sql_error(raw_message)
+            safe_message = redact_sensitive_text(raw_message)
+            msg = f"SQL generation failed: {safe_message}"
             self.logger.error(msg)
-            err_type = classify_sql_error(str(exc))
             return {
                 "sql_query": "",
                 "sql_reasoning": "",
                 "sql_error": msg,
-                "sql_error_type": err_type if err_type == "provider" else "generation",
-                "sql_error_message": str(exc),
+                "sql_error_type": (
+                    err_type if err_type in {"provider", "connection"} else "generation"
+                ),
+                "sql_error_message": safe_message,
             }
 
     def preflight_sql(
@@ -194,14 +283,15 @@ class SQLService:
                 "sql_error_message": "",
             }
         except Exception as exc:
-            msg = str(exc)
-            err_type = classify_sql_error(msg)
-            self.logger.error("SQL execution failed (%s): %s", err_type, msg)
+            raw_message = str(exc)
+            err_type = classify_sql_error(raw_message)
+            safe_message = redact_sensitive_text(raw_message)
+            self.logger.error("SQL execution failed (%s): %s", err_type, safe_message)
             return {
                 "sql_rows": [],
-                "sql_error": msg,
+                "sql_error": safe_message,
                 "sql_error_type": err_type,
-                "sql_error_message": msg,
+                "sql_error_message": safe_message,
             }
 
     def repair_sql(
@@ -229,33 +319,29 @@ class SQLService:
             }
 
         allowed_tables_text = ", ".join(allowed_tables)
+        messages = [
+            SystemMessage(
+                content=SQL_REPAIR_SYSTEM_PROMPT.format(
+                    schema_text=schema_context,
+                    allowed_tables=allowed_tables_text,
+                    metadata_context=(metadata_context.strip() or "No metadata hints."),
+                    conversation_context=(
+                        conversation_context.strip() or "No prior conversation context."
+                    ),
+                    row_limit=self.row_limit,
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"User question:\n{question}\n\n"
+                    f"Failed SQL:\n{failed_sql}\n\n"
+                    f"Database error:\n{sql_error}"
+                )
+            ),
+        ]
 
         try:
-            draft = self.sql_llm.invoke(
-                [
-                    SystemMessage(
-                        content=SQL_REPAIR_SYSTEM_PROMPT.format(
-                            schema_text=schema_context,
-                            allowed_tables=allowed_tables_text,
-                            metadata_context=(
-                                metadata_context.strip() or "No metadata hints."
-                            ),
-                            conversation_context=(
-                                conversation_context.strip()
-                                or "No prior conversation context."
-                            ),
-                            row_limit=self.row_limit,
-                        )
-                    ),
-                    HumanMessage(
-                        content=(
-                            f"User question:\n{question}\n\n"
-                            f"Failed SQL:\n{failed_sql}\n\n"
-                            f"Database error:\n{sql_error}"
-                        )
-                    ),
-                ]
-            )
+            draft = self._invoke_sql_draft_with_fallback(messages)
             self.logger.info("SQL repaired on attempt=%d.", attempts)
             repaired_sql = normalize_sql(draft.sql)
             if not repaired_sql:
@@ -279,15 +365,19 @@ class SQLService:
                 "sql_error_message": "",
             }
         except Exception as exc:
-            msg = f"SQL repair failed: {exc}"
+            raw_message = str(exc)
+            err_type = classify_sql_error(raw_message)
+            safe_message = redact_sensitive_text(raw_message)
+            msg = f"SQL repair failed: {safe_message}"
             self.logger.error(msg)
-            err_type = classify_sql_error(str(exc))
             return {
                 "sql_query": "",
                 "last_failed_sql": failed_sql,
                 "sql_reasoning": "",
                 "attempts": attempts,
                 "sql_error": msg,
-                "sql_error_type": err_type if err_type == "provider" else "repair",
-                "sql_error_message": str(exc),
+                "sql_error_type": (
+                    err_type if err_type in {"provider", "connection"} else "repair"
+                ),
+                "sql_error_message": safe_message,
             }

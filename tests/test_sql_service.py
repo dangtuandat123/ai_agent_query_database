@@ -2,7 +2,11 @@ import logging
 from types import SimpleNamespace
 from typing import Any, List
 
-from taxi_agent.services.sql_service import SQLService, classify_sql_error
+from taxi_agent.services.sql_service import (
+    SQLService,
+    classify_sql_error,
+    redact_sensitive_text,
+)
 
 
 class FakeDB:
@@ -36,6 +40,32 @@ class ProviderFailSQLLLM(FakeSQLLLM):
         self.last_messages = messages
         _ = messages
         raise RuntimeError("401 Unauthorized")
+
+
+class ConnectionFailSQLLLM(FakeSQLLLM):
+    def invoke(self, messages: Any) -> Any:
+        self.last_messages = messages
+        _ = messages
+        raise RuntimeError("could not connect to server: Connection refused")
+
+
+class SensitiveFailSQLLLM(FakeSQLLLM):
+    def invoke(self, messages: Any) -> Any:
+        self.last_messages = messages
+        _ = messages
+        raise RuntimeError(
+            "could not connect using postgresql://postgres:supersecret@localhost:5432/taxi_db "
+            "password=supersecret api_key=sk-secret-token"
+        )
+
+
+class RawSQLLLM:
+    def __init__(self, content: str):
+        self.content = content
+
+    def invoke(self, messages: Any) -> Any:
+        _ = messages
+        return SimpleNamespace(content=self.content)
 
 
 def test_classify_sql_error() -> None:
@@ -141,6 +171,82 @@ def test_generate_sql_provider_error_classification() -> None:
     )
     assert result["sql_error_type"] == "provider"
     assert "401" in result["sql_error"]
+
+
+def test_generate_sql_connection_error_classification() -> None:
+    service = SQLService(
+        sql_llm=ConnectionFailSQLLLM(),
+        db=FakeDB(),  # type: ignore[arg-type]
+        logger=logging.getLogger("test.sql"),
+    )
+    result = service.generate_sql(
+        question="q",
+        schema_context="Table: public.taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+    )
+    assert result["sql_error_type"] == "connection"
+    assert "connect" in result["sql_error"].lower()
+
+
+def test_repair_sql_connection_error_classification() -> None:
+    service = SQLService(
+        sql_llm=ConnectionFailSQLLLM(),
+        db=FakeDB(),  # type: ignore[arg-type]
+        logger=logging.getLogger("test.sql"),
+    )
+    result = service.repair_sql(
+        question="q",
+        failed_sql="SELECT 1",
+        sql_error="err",
+        schema_context="Table: public.taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+        attempts=1,
+    )
+    assert result["sql_error_type"] == "connection"
+
+
+def test_redact_sensitive_text_masks_dsn_and_api_key() -> None:
+    raw = (
+        "failed with postgresql://postgres:supersecret@localhost:5432/taxi_db "
+        "password=supersecret api_key=sk-live-secret "
+        "Authorization: Bearer token-value"
+    )
+    redacted = redact_sensitive_text(raw)
+    assert "supersecret" not in redacted
+    assert "sk-live-secret" not in redacted
+    assert "token-value" not in redacted
+    assert "***" in redacted
+
+
+def test_generate_sql_redacts_sensitive_error_message() -> None:
+    service = SQLService(
+        sql_llm=SensitiveFailSQLLLM(),
+        db=FakeDB(),  # type: ignore[arg-type]
+        logger=logging.getLogger("test.sql"),
+    )
+    result = service.generate_sql(
+        question="q",
+        schema_context="Table: public.taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+    )
+    assert "supersecret" not in result["sql_error"]
+    assert "sk-secret-token" not in result["sql_error"]
+
+
+def test_generate_sql_fallback_parses_raw_sql_when_structured_fails() -> None:
+    service = SQLService(
+        sql_llm=FakeSQLLLM(should_fail=True),
+        db=FakeDB(),  # type: ignore[arg-type]
+        logger=logging.getLogger("test.sql"),
+        raw_llm=RawSQLLLM("```sql\nSELECT * FROM public.taxi_trip_data LIMIT 1;\n```"),
+    )
+    result = service.generate_sql(
+        question="q",
+        schema_context="Table: public.taxi_trip_data",
+        allowed_tables=["public.taxi_trip_data", "taxi_trip_data"],
+    )
+    assert result["sql_error"] == ""
+    assert result["sql_query"] == "SELECT * FROM public.taxi_trip_data LIMIT 1"
 
 
 def test_repair_sql_empty_output_is_repair_error() -> None:

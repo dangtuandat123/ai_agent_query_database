@@ -8,6 +8,12 @@ Available tables:
 Return:
 - route="sql" if the question can be answered from the schema tables.
 - route="unsupported" if it cannot (for example asks weather, asks for external data, asks for write actions).
+
+Output format:
+- Return ONLY a JSON object with keys:
+  - "route": "sql" or "unsupported"
+  - "reason": short string
+- Do not include markdown fences.
 """
 
 
@@ -25,6 +31,12 @@ Return:
 - intent="sql_query" for a standalone SQL query request.
 - intent="sql_followup" for a follow-up request that depends on previous result/query.
 - intent="unsupported" if it cannot be solved from the current schema.
+
+Output format:
+- Return ONLY a JSON object with keys:
+  - "intent": "sql_query" | "sql_followup" | "unsupported"
+  - "reason": short string
+- Do not include markdown fences.
 """
 
 
@@ -52,6 +64,12 @@ Rules:
 5) Prefer explicit column names.
 6) If query returns raw rows (non-aggregate), include LIMIT {row_limit}.
 7) Keep SQL valid PostgreSQL syntax.
+
+Output format:
+- Return ONLY a JSON object with keys:
+  - "sql": generated SQL string
+  - "reasoning": short string
+- Do not include markdown fences.
 """
 
 
@@ -77,6 +95,12 @@ Rules:
 3) Use only tables listed in "Allowed tables".
 4) Never use write operations.
 5) If query returns raw rows (non-aggregate), include LIMIT {row_limit}.
+
+Output format:
+- Return ONLY a JSON object with keys:
+  - "sql": repaired SQL string
+  - "reasoning": short string
+- Do not include markdown fences.
 """
 
 

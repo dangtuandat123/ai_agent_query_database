@@ -111,6 +111,43 @@ class ProviderFailLLM(FakeLLM):
         raise RuntimeError("401 Unauthorized")
 
 
+class RouterFailureLLM(FakeLLM):
+    def with_structured_output(self, schema: Any) -> Any:
+        if schema is RouteDecision:
+            return SimpleNamespace(
+                invoke=lambda messages: (_ for _ in ()).throw(
+                    RuntimeError("router parsing failed")
+                )
+            )
+        return super().with_structured_output(schema)
+
+
+class RouterPayloadFailureLLM(FakeLLM):
+    def with_structured_output(self, schema: Any) -> Any:
+        if schema is RouteDecision:
+            return SimpleNamespace(
+                invoke=lambda messages: (_ for _ in ()).throw(
+                    RuntimeError(
+                        "Invalid JSON: input_value='route=\"unsupported\"', input_type=str"
+                    )
+                )
+            )
+        return super().with_structured_output(schema)
+
+
+class IntentPayloadFailureLLM(FakeLLM):
+    def with_structured_output(self, schema: Any) -> Any:
+        if schema is IntentDecision:
+            return SimpleNamespace(
+                invoke=lambda messages: (_ for _ in ()).throw(
+                    RuntimeError(
+                        "Invalid JSON: input_value={'intent': 'sql_followup'}, input_type=dict"
+                    )
+                )
+            )
+        return super().with_structured_output(schema)
+
+
 def _settings() -> Settings:
     return Settings(
         postgres_dsn="postgresql://postgres:postgres@localhost:5432/taxi_db",
@@ -195,6 +232,89 @@ def test_graph_unsupported_route() -> None:
 
     assert result["route"] == "unsupported"
     assert "cannot answer" in result["final_answer"].lower()
+
+
+def test_graph_router_failure_falls_back_to_sql_path() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = RouterFailureLLM(
+        intent="sql_query",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Show one row from table_a")
+
+    assert result["route"] == "sql"
+    assert result["sql_error"] == ""
+    assert result["final_answer"] == "done"
+
+
+def test_graph_router_failure_falls_back_to_unsupported_for_weather() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[])
+    fake_llm = RouterFailureLLM(intent="sql_query")
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("What is weather in Hanoi?")
+
+    assert result["route"] == "unsupported"
+    assert "cannot answer" in result["final_answer"].lower()
+
+
+def test_graph_router_payload_error_recovers_route_literal() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[])
+    fake_llm = RouterPayloadFailureLLM()
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Show one row from table_a")
+
+    assert result["route"] == "unsupported"
+    assert "parser error payload" in result["route_reason"].lower()
+
+
+def test_graph_intent_payload_error_recovers_intent_literal() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+    fake_llm = IntentPayloadFailureLLM(
+        route="sql",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("So sánh với truy vấn trước")
+
+    assert result["route"] == "sql"
+    assert result["intent"] == "sql_followup"
 
 
 def test_graph_unsupported_intent_uses_intent_reason() -> None:

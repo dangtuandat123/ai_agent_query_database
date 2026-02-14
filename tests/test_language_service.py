@@ -12,7 +12,7 @@ from taxi_agent.services.language_service import (
 
 def test_is_probably_vietnamese_by_diacritics() -> None:
     assert is_probably_vietnamese("Trong thang nay co bao nhieu chuyen?")
-    assert is_probably_vietnamese("T\u1ed5ng doanh thu l\u00e0 bao nhi\u00eau?")
+    assert is_probably_vietnamese("Tổng doanh thu là bao nhiêu?")
 
 
 def test_is_probably_vietnamese_english_false() -> None:
@@ -23,10 +23,10 @@ def test_is_probably_vietnamese_english_false() -> None:
 
 def test_fallback_messages_vn() -> None:
     q = "Trong thang 3/2018 co bao nhieu chuyen?"
-    assert "Kh\u00f4ng c\u00f3 d\u1eef li\u1ec7u" in fallback_no_data_message(q)
-    assert "\u0110\u00e3 truy v\u1ea5n th\u00e0nh c\u00f4ng" in fallback_success_message(q, 3)
-    assert "Kh\u00f4ng th\u1ec3 tr\u1ea3 l\u1eddi" in unsupported_message(q, "x")
-    assert "Th\u1ef1c thi truy v\u1ea5n th\u1ea5t b\u1ea1i" in error_after_retry_message(
+    assert "Không có dữ liệu" in fallback_no_data_message(q)
+    assert "Đã truy vấn thành công" in fallback_success_message(q, 3)
+    assert "Không thể trả lời" in unsupported_message(q, "x")
+    assert "Thực thi truy vấn thất bại" in error_after_retry_message(
         q, "SELECT 1", "err"
     )
 
