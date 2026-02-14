@@ -367,6 +367,30 @@ class TaxiDashboardAgent:
             return match.group(1).lower()
         return None
 
+    @staticmethod
+    def _tokenize_heuristic_text(text: str) -> set[str]:
+        return {token for token in re.findall(r"[a-z0-9_]+", text.lower()) if token}
+
+    def _is_followup_question_heuristic(self, question: str, has_previous: bool) -> bool:
+        if not has_previous:
+            return False
+
+        normalized_question = normalize_for_matching(question)
+        phrase_hints = (
+            "so sanh",
+            "compare",
+            "what about",
+            "how about",
+            "same filter",
+            "voi truoc",
+        )
+        if any(hint in normalized_question for hint in phrase_hints):
+            return True
+
+        token_hints = {"con", "tiep", "again", "vs"}
+        question_tokens = self._tokenize_heuristic_text(normalized_question)
+        return bool(question_tokens.intersection(token_hints))
+
     def _invoke_parser_fallback(
         self,
         *,
@@ -440,22 +464,10 @@ class TaxiDashboardAgent:
             if parsed is not None:
                 return {"intent": parsed.intent, "intent_reason": parsed.reason}
 
-            normalized_question = normalize_for_matching(question)
-            followup_hints = (
-                "con",
-                "so sanh",
-                "compare",
-                "what about",
-                "how about",
-                "tiep",
-                "again",
-                "same filter",
-                "vs",
-                "voi truoc",
-            )
             has_previous = bool(state.get("previous_question", "").strip())
-            is_followup = has_previous and any(
-                hint in normalized_question for hint in followup_hints
+            is_followup = self._is_followup_question_heuristic(
+                question=question,
+                has_previous=has_previous,
             )
             return {
                 "intent": "sql_followup" if is_followup else "sql_query",

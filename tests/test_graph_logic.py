@@ -704,6 +704,42 @@ def test_graph_followup_heuristic_handles_vietnamese_no_diacritics() -> None:
     assert "table_b" in second["sql_query"].lower()
 
 
+def test_graph_followup_heuristic_avoids_false_positive_on_con_substring() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
+
+    class IntentFailureLLM(FakeLLM):
+        def with_structured_output(self, schema: Any) -> Any:
+            if schema is IntentDecision:
+                return SimpleNamespace(
+                    invoke=lambda messages: (_ for _ in ()).throw(
+                        RuntimeError("intent provider unavailable")
+                    )
+                )
+            return super().with_structured_output(schema)
+
+    fake_llm = IntentFailureLLM(
+        route="sql",
+        sql_first="SELECT * FROM public.table_a LIMIT 1",
+        sql_second="SELECT * FROM public.table_a LIMIT 1",
+        answer_text="done",
+    )
+    fake_retriever = FakeRetriever(selected_tables=tables)
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+
+    first = agent.ask("Show one row from table_a")
+    second = agent.ask("Show congestion trends by day for table_a")
+
+    assert first["sql_error"] == ""
+    assert second["intent"] == "sql_query"
+    assert second["intent_reason"] == "Heuristic fallback"
+
+
 def test_graph_thread_memory_is_isolated() -> None:
     tables = _tables()
     fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
