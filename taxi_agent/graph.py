@@ -329,7 +329,6 @@ class TaxiDashboardAgent:
             "weather",
             "temperature",
             "bitcoin",
-            "stock",
             "football",
             "soccer",
             "news",
@@ -343,6 +342,12 @@ class TaxiDashboardAgent:
             "insert into",
             "update set",
             "create database",
+            # Vietnamese (normalized without diacritics)
+            "thoi tiet",
+            "nhiet do",
+            "gia co phieu",
+            "tin tuc",
+            "bong da",
         )
         question_tokens = TaxiDashboardAgent._tokenize_heuristic_text(normalized)
         if question_tokens.intersection(token_hints):

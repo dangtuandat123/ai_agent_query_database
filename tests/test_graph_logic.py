@@ -314,6 +314,24 @@ def test_graph_router_failure_falls_back_to_unsupported_for_weather() -> None:
     assert "cannot answer" in result["final_answer"].lower()
 
 
+def test_graph_router_failure_falls_back_to_unsupported_for_vietnamese_weather() -> None:
+    tables = _tables()
+    fake_db = FakeDB(tables=tables, rows=[])
+    fake_llm = RouterFailureLLM(intent="sql_query")
+    fake_retriever = FakeRetriever(selected_tables=[tables[0]])
+
+    agent = TaxiDashboardAgent(
+        _settings(),
+        db_client=fake_db,  # type: ignore[arg-type]
+        llm=fake_llm,  # type: ignore[arg-type]
+        schema_retriever=fake_retriever,  # type: ignore[arg-type]
+    )
+    result = agent.ask("Thời tiết hôm nay ở Hà Nội như thế nào?")
+
+    assert result["route"] == "unsupported"
+    assert "không thể" in result["final_answer"].lower()
+
+
 def test_graph_router_heuristic_avoids_false_positive_on_newest_word() -> None:
     tables = _tables()
     fake_db = FakeDB(tables=tables, rows=[{"id": 1}])
